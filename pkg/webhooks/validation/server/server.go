@@ -130,6 +130,7 @@ type admitFunc func(*kube.AdmissionRequest) *kube.AdmissionResponse
 func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	var body []byte
 	if r.Body != nil {
+		// 读取请求中的数据
 		if data, err := kube.HTTPConfigReader(r); err == nil {
 			body = data
 		} else {
@@ -157,10 +158,12 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	if out, _, err := deserializer.Decode(body, nil, obj); err != nil {
 		reviewResponse = toAdmissionResponse(fmt.Errorf("could not decode body: %v", err))
 	} else {
+		// 将请求中的数据赋值到ar结构体
 		ar, err = kube.AdmissionReviewKubeToAdapter(out)
 		if err != nil {
 			reviewResponse = toAdmissionResponse(fmt.Errorf("could not decode object: %v", err))
 		} else {
+			// 赋值成功后，调用admit函数处理请求
 			reviewResponse = admit(ar.Request)
 		}
 	}
@@ -179,6 +182,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 		}
 	}
 	responseKube = kube.AdmissionReviewAdapterToKube(&response, apiVersion)
+	// 将admit函数返回的结果返回给用户
 	resp, err := json.Marshal(responseKube)
 	if err != nil {
 		reportValidationHTTPError(http.StatusInternalServerError)
@@ -195,16 +199,20 @@ func (wh *Webhook) serveValidate(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, wh.validate)
 }
 
+//将数据进行格式转换、校验。在 Webhook Server 的 descriptor 对象中保存了与Pilot相关的所有配置信息及校验函数。通过数据对象的类型即可在schemas中找到校验函数，对数据进行校验
 func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionResponse {
+	// 首先校验请求类型，只处理Create、Update两种类型的请求
 	switch request.Operation {
 	case kube.Create, kube.Update:
 	default:
+		// 对于不支持的操作类型，直接返回校验通过
 		scope.Warnf("Unsupported webhook operation %v", request.Operation)
 		reportValidationFailed(request, reasonUnsupportedOperation)
 		return &kube.AdmissionResponse{Allowed: true}
 	}
 
 	var obj crd.IstioKind
+	// 将数据对象赋值到Istio标准的对象obj中
 	if err := json.Unmarshal(request.Object.Raw, &obj); err != nil {
 		scope.Infof("cannot decode configuration: %v", err)
 		reportValidationFailed(request, reasonYamlDecodeError)
@@ -220,6 +228,7 @@ func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionRespo
 		gvk.Kind != collections.IstioNetworkingV1Beta1Proxyconfigs.Resource().Kind() {
 		gvk.Version = "v1alpha3"
 	}
+	// 根据数据对象的类型从schemas中获取schema
 	s, exists := wh.schemas.FindByGroupVersionKind(resource.FromKubernetesGVK(&gvk))
 	if !exists {
 		scope.Infof("unrecognized type %v", obj.GroupVersionKind())
@@ -227,6 +236,7 @@ func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionRespo
 		return toAdmissionResponse(fmt.Errorf("unrecognized type %v", obj.GroupVersionKind()))
 	}
 
+	// 结合schema将obj转换为model.Config类型的数据
 	out, err := crd.ConvertObject(s, &obj, wh.domainSuffix)
 	if err != nil {
 		scope.Infof("error decoding configuration: %v", err)
@@ -234,6 +244,7 @@ func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionRespo
 		return toAdmissionResponse(fmt.Errorf("error decoding configuration: %v", err))
 	}
 
+	// 调用schema中的ValidateConfig函数对数据对象进行校验
 	warnings, err := s.Resource().ValidateConfig(*out)
 	if err != nil {
 		scope.Infof("configuration is invalid: %v", err)
@@ -247,6 +258,7 @@ func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionRespo
 	}
 
 	reportValidationPass(request)
+	// 返回校验结果
 	return &kube.AdmissionResponse{Allowed: true, Warnings: toKubeWarnings(warnings)}
 }
 
