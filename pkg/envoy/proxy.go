@@ -118,9 +118,12 @@ func (e *envoy) args(fname string, epoch int, bootstrapConfig string) []string {
 	}
 	startupArgs := []string{
 		"-c", fname,
+		// epoch决定了Envoy热正启的顺序，第一个Envoy进程对应的epoch为0，后面新建的Envoy进程对应的epoch顺序递增1。
 		"--restart-epoch", fmt.Sprint(epoch),
+		// 在pilot-agent组件的init函数中指定默认值为2s，可以通过pilot-agent组件中Proxy命令的DrainDuration flag指定。
 		"--drain-time-s", fmt.Sprint(int(e.DrainDuration.AsDuration().Seconds())),
 		"--drain-strategy", "immediate", // Clients are notified as soon as the drain process starts.
+		// 在pilot-agent组件的int函数中指定默认值为3s，可以通过pilot-agent组件中Proxy命令的ParentShutdownDuration flag 指定。
 		"--parent-shutdown-time-s", fmt.Sprint(int(e.ParentShutdownDuration.AsDuration().Seconds())),
 		"--local-address-ip-version", proxyLocalAddressType,
 		// Reduce default flush interval from 10s to 1s. The access log buffer size is 64k and each log is ~256 bytes

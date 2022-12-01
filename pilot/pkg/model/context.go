@@ -230,8 +230,13 @@ type Proxy struct {
 	sync.RWMutex
 
 	// Type specifies the node type. First part of the ID.
+	// pilot-agent的role有两种运行模式。根据role.Type变量定义，有Sidecar和Router两种类型，默认是Sidecar。
 	Type NodeType
 
+	/*
+	 IPAddresses、ID、DNSDomain：可以接收参数，根据注册中心的类型给予默认值。
+	 在Kubernetes环境下，IPAddresses默认值为INSTANCE_IP，ID默认值为POD_NAME，DNSDomain默认值为default.svc.cluster.local。
+	*/
 	// IPAddresses is the IP addresses of the proxy used to identify it and its
 	// co-located service instances. Example: "10.60.1.6". In some cases, the host
 	// where the proxy and service instances reside may have more than one IP address

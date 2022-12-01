@@ -138,6 +138,8 @@ func ConfigNamesOfKind(configs map[ConfigKey]struct{}, kind config.GroupVersionK
 //
 // Object references supplied and returned from this interface should be
 // treated as read-only. Modifying them violates thread-safety.
+// ConfigStore对象将client-go库从Kubernetes中获取以RouteRule、VirtualService等CRD形式存在的控制平面信息，
+// 转换为model包下的Config对象，并对外提供Get、List、Create、update、Delete等CRUD服务。
 type ConfigStore interface {
 	// Schemas exposes the configuration type schema known by the config store.
 	// The type schema defines the bidirectional mapping between configuration
@@ -189,6 +191,7 @@ type EventHandler = func(config.Config, config.Config, Event)
 // Handlers execute on the single worker queue in the order they are appended.
 // Handlers receive the notification event and the associated object.  Note
 // that all handlers must be registered before starting the cache controller.
+// ConfgStoreCachle 则主要扩展了注册Conig变更事件处理函数RegisterEventHandler和开始处理流程的Run方法。
 type ConfigStoreController interface {
 	// 控制器核心的资源缓存接口，提供了Config资源的增、删、改、查功能
 	ConfigStore

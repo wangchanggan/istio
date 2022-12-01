@@ -150,9 +150,12 @@ var (
 			go iptableslog.ReadNFLOGSocket(ctx)
 
 			// On SIGINT or SIGTERM, cancel the context, triggering a graceful shutdown
+			// 启动协程调用cmd.WaitSignalFunc以等待进程接收SIGTERM信号，在接收到信号之后通过contxt通知agent对象，
+			// 在agent接到通知后调用terminate来结束所有Envoy进程，并退出agent进程。
 			go cmd.WaitSignalFunc(cancel)
 
 			// Start in process SDS, dns server, xds proxy, and Envoy.
+			// agent.Run主进程堵塞，监听envoyWaitCh，这里的status其实就是exitStatus，在监听到exitStatus后，删除当前epochs中的channel资源。
 			wait, err := agent.Run(ctx)
 			if err != nil {
 				return err

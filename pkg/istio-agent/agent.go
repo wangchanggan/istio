@@ -445,6 +445,7 @@ func (a *Agent) Run(ctx context.Context) (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to find root XDS CA: %v", err)
 	}
+	//用于监控各种证书，如果证书文件发生变化，则重新生成证书签名并重启Envoy。
 	go a.caFileWatcherHandler(ctx, rootCAForXDS)
 
 	if !a.EnvoyDisabled() {

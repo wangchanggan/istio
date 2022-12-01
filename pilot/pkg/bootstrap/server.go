@@ -213,6 +213,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	prometheus.EnableHandlingTimeHistogram()
 
 	// Apply the arguments to the configuration.
+	// 创建Kubernetes apiserver client
 	if err := s.initKubeClient(args); err != nil {
 		return nil, fmt.Errorf("error initializing kube client: %v", err)
 	}
@@ -220,6 +221,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	// used for both initKubeRegistry and initClusterRegistries
 	args.RegistryOptions.KubeOptions.EndpointMode = kubecontroller.DetectEndpointMode(s.kubeClient)
 
+	// 读取Mesh配置，默认 Mesh 配置文件位于/etc/istio/config/mesh 路径下。
 	s.initMeshConfiguration(args, s.fileWatcher)
 	spiffe.SetTrustDomain(s.environment.Mesh().GetTrustDomain())
 
@@ -301,6 +303,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	// This should be called only after controllers are initialized.
 	s.initRegistryEventHandlers()
 
+	//初始化 Discovery服务，将 Discovery 服务注册为 Config Controller和 Service Controller的 Event Handler,监听配置和服务变化消息。
 	s.initDiscoveryService(args)
 
 	s.initSDSServer()
@@ -1080,9 +1083,11 @@ func (s *Server) initControllers(args *PilotArgs) error {
 	if err := s.initCertController(args); err != nil {
 		return fmt.Errorf("error initializing certificate controller: %v", err)
 	}
+	// 连接初始化与配置存储中心，对 Istio进行各种配置
 	if err := s.initConfigController(args); err != nil {
 		return fmt.Errorf("error initializing config controller: %v", err)
 	}
+	// 连接配置与服务注册中心
 	if err := s.initServiceControllers(args); err != nil {
 		return fmt.Errorf("error initializing service controllers: %v", err)
 	}
