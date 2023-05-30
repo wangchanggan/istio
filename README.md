@@ -17,11 +17,11 @@ https://github.com/istio/istio/archive/refs/tags/1.14.1.zip
     -   [Galley](#galley)
 
 ## 总体架构
-![image](docs/images/istio_arch.svg)
+![](/docs/images/istio_arch.svg)
 
 ## Pilot
 ### 架构
-![image](docs/images/pilot_arch.png)
+![](/docs/images/pilot_arch.png)
 
 1.抽象模型(Abstract Model)：为了实现对不同服务注册中心（Kubernetes、Consul等）的支持，Pilot需要对不同来源的输入数据进行统一格式的存储。
 
@@ -32,7 +32,7 @@ https://github.com/istio/istio/archive/refs/tags/1.14.1.zip
 4.用户API (User API)：提供了面向业务的高层抽象，可以被运维人员理解和使用。
 
 ### 实现
-![image](docs/images/pilot_imp.png)
+![](/docs/images/pilot_imp.png)
 
 * Discovery Service：即pilot-diecovery，主要功能是从Service Provider(如Kubernetes或Consul)中获取服务信息，从Kubernetes API Server中获取流量规则(Kubernetes CRD Resource），并将服务信息和流量规则转化为数据平面可以理解的格式，通过标准的数据平面API下发到网格中的各个Sidecar中。
 * agent：即pilot-agent组件，该进程根据Kubernetes API Server中的配置信息生成Envoy的配置文件，负责启动、监控Sidecar进程。
@@ -102,7 +102,7 @@ security/pkg/k8s/chiron/controller.go:92
 
 cache.NewInformer创建Kubernetes Informer用于监听Secret对象，并注册了资源事件处理回调函数。
 #### CertController的核心原理
-![image](docs/images/secret_event_processing_flow.png)
+![](/docs/images/secret_event_processing_flow.png)
 
 security/pkg/k8s/chiron/controller.go:228,254
 ### CA Server的创建和核心原理
