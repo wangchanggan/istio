@@ -70,6 +70,7 @@ func NewRootCommand() *cobra.Command {
 }
 
 func newDiscoveryCommand() *cobra.Command {
+	// pilot-discovery的启动命令
 	return &cobra.Command{
 		Use:   "discovery",
 		Short: "Start Istio proxy discovery service.",
@@ -79,9 +80,11 @@ func newDiscoveryCommand() *cobra.Command {
 			UnknownFlags: true,
 		},
 		PreRunE: func(c *cobra.Command, args []string) error {
+			// 设置日志系统，主要设置日志级别，输出路径等;
 			if err := log.Configure(loggingOptions); err != nil {
 				return err
 			}
+			// 校验启动参数，防止传入非法参数。
 			if err := validateFlags(serverArgs); err != nil {
 				return err
 			}
@@ -97,12 +100,17 @@ func newDiscoveryCommand() *cobra.Command {
 			stop := make(chan struct{})
 
 			// Create the server for the discovery service.
+			// 创建Pilot服务器对象
+			// Pilot Server对象是注册中心与Sidecar代理之间的桥梁，它将服务及配置资源转化成xDS配置，再通过gRPC连接流将xDS配置发送给Sidecar。
 			discoveryServer, err := bootstrap.NewServer(serverArgs)
 			if err != nil {
 				return fmt.Errorf("failed to create discovery service: %v", err)
 			}
 
 			// Start the server
+			// 启动Pilot服务器
+			// Pilot服务器的启动是通过执行其所有模块的启动函数startFuncs实现的
+			// 在模块初始化时都会通过func (s *Server) addStartFunc(fn server.Component)接口将自己的启动任务注册到服务器对象的server属性中
 			if err := discoveryServer.Start(stop); err != nil {
 				return fmt.Errorf("failed to start discovery service: %v", err)
 			}
@@ -110,6 +118,7 @@ func newDiscoveryCommand() *cobra.Command {
 			cmd.WaitSignal(stop)
 			// Wait until we shut down. In theory this could block forever; in practice we will get
 			// forcibly shut down after 30s in Kubernetes.
+			// 优雅退出
 			discoveryServer.WaitUntilCompletion()
 			return nil
 		},

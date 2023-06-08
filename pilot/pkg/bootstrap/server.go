@@ -101,25 +101,31 @@ type readinessProbe func() bool
 
 // Server contains the runtime configuration for the Pilot discovery service.
 type Server struct {
+	// 提供xDS服务的模块
 	XDSServer *xds.DiscoveryServer
-
-	clusterID   cluster.ID
+	// Config集群的ID地址
+	clusterID cluster.ID
+	// Pilot的资源聚合接口
 	environment *model.Environment
-
+	// 连接Config集群的Kubernetes客户端
 	kubeClient kubelib.Client
-
+	// 多集群支持，单一Pilot组件支持底层的多个Kubernetes集群
 	multiclusterController *multicluster.Controller
-
-	configController       model.ConfigStoreController
-	ConfigStores           []model.ConfigStoreController
+	// Istio 配置规则的发现聚合接口
+	configController model.ConfigStoreController
+	// Istio 配置规则的缓存
+	ConfigStores []model.ConfigStoreController
+	// ServiceEntry控制器，负责ServiceEntry的服务发现
 	serviceEntryController *serviceentry.Controller
-
-	httpServer  *http.Server // debug, monitoring and readiness Server.
-	httpAddr    string
+	// HTTP服务器，用于调试、监控及健康检查，默认监听8080端口
+	httpServer *http.Server // debug, monitoring and readiness Server.
+	httpAddr   string
+	// Webhook服务器，主要用于Sidecar注入和Istio API校验，默认监听15017端口
 	httpsServer *http.Server // webhooks HTTPS Server.
-
-	grpcServer        *grpc.Server
-	grpcAddress       string
+	// 非安全的gRPC服务器，默认监听15010端口
+	grpcServer  *grpc.Server
+	grpcAddress string
+	// 安全的gRPC服务器，默认监听15012端口
 	secureGrpcServer  *grpc.Server
 	secureGrpcAddress string
 
@@ -146,15 +152,19 @@ type Server struct {
 	cacertsWatcher *fsnotify.Watcher
 	dnsNames       []string
 
+	// 用于处理CSR请求并签发工作负载证书
 	CA *ca.IstioCA
+	// 与CA类似
 	RA ra.RegistrationAuthority
 
 	// TrustAnchors for workload to workload mTLS
+	// Istio的多根证书支持，保存多根证书
 	workloadTrustBundle     *tb.TrustBundle
 	certMu                  sync.RWMutex
 	istiodCert              *tls.Certificate
 	istiodCertBundleWatcher *keycertbundle.Watcher
-	server                  server.Instance
+	// Pilot 的所有组件都注册启动任务到此实体对象，主要用于实现Pilot的优雅退出
+	server server.Instance
 
 	readinessProbes map[string]readinessProbe
 	readinessFlags  *readinessFlags
