@@ -230,6 +230,7 @@ func (s *Server) initConfigSources(args *PilotArgs) (err error) {
 			s.ConfigStores = append(s.ConfigStores, configController)
 			log.Infof("Started File configSource %s", configSource.Address)
 		case XDS:
+			// 创建MCP客户端，MCP客户端负责与MCP服务器连接并且订阅Istio的配置资源
 			xdsMCP, err := adsc.New(srcAddress.Host, &adsc.Config{
 				Namespace: args.Namespace,
 				Workload:  args.PodName,
@@ -254,6 +255,7 @@ func (s *Server) initConfigSources(args *PilotArgs) (err error) {
 			}
 			store := memory.Make(collections.Pilot)
 			// TODO: enable namespace filter for memory controller
+			// 创建一个基于内存的ConfigStoreCache，以提供MCP客户端使用，并缓存订阅的配置资源并提供事件回调。
 			configController := memory.NewController(store)
 			configController.RegisterHasSyncedHandler(xdsMCP.HasSynced)
 			xdsMCP.Store = configController
@@ -350,6 +352,7 @@ func (s *Server) makeKubeConfigController(args *PilotArgs) (*crdclient.Client, e
 	if args.RegistryOptions.KubeOptions.DiscoveryNamespacesFilter != nil {
 		opts.NamespacesFilter = args.RegistryOptions.KubeOptions.DiscoveryNamespacesFilter.Filter
 	}
+	// 创建一组CRD控制器，负责监听Istio API对象。如果使用了Gateway API，那么在初始化ConfigController时还会创建GatewayController，负责从Kubernetes Gateway API到Istio Gateway/VirtualService的转换。
 	return crdclient.New(s.kubeClient, opts)
 }
 

@@ -154,18 +154,22 @@ type ConfigStore interface {
 	// Schemas exposes the configuration type schema known by the config store.
 	// The type schema defines the bidirectional mapping between configuration
 	// types and the protobuf encoding schema.
+	// 获取配置类型的 Schema
 	Schemas() collection.Schemas
 
 	// Get retrieves a configuration element by a type and a key
+	// 按照名称和命名空间获取配置规则
 	Get(typ config.GroupVersionKind, name, namespace string) *config.Config
 
 	// List returns objects by type and namespace.
 	// Use "" for the namespace to list across namespaces.
+	// 按命名空间查询配置规则
 	List(typ config.GroupVersionKind, namespace string) []config.Config
 
 	// Create adds a new configuration object to the store. If an object with the
 	// same name and namespace for the type already exists, the operation fails
 	// with no side effects.
+	// 创建配置规则，主要用于测试
 	Create(config config.Config) (revision string, err error)
 
 	// Update modifies an existing configuration object in the store.  Update
@@ -173,16 +177,20 @@ type ConfigStore interface {
 	// overriding a value that has been changed between prior _Get_ and _Put_
 	// operation to achieve optimistic concurrency. This method returns a new
 	// revision if the operation succeeds.
+	// 更新指定的配置规则
 	Update(config config.Config) (newRevision string, err error)
+	// 更新配置规则的状态
 	UpdateStatus(config config.Config) (newRevision string, err error)
 
 	// Patch applies only the modifications made in the PatchFunc rather than doing a full replace. Useful to avoid
 	// read-modify-write conflicts when there are many concurrent-writers to the same resource.
+	// 对指定的配置规则打补丁
 	Patch(orig config.Config, patchFn config.PatchFunc) (string, error)
 
 	// Delete removes an object from the store by key
 	// For k8s, resourceVersion must be fulfilled before a deletion is carried out.
 	// If not possible, a 409 Conflict status will be returned.
+	// 删除配置规则
 	Delete(typ config.GroupVersionKind, name, namespace string, resourceVersion *string) error
 }
 
@@ -202,17 +210,21 @@ type EventHandler = func(config.Config, config.Config, Event)
 // Handlers receive the notification event and the associated object.  Note
 // that all handlers must be registered before starting the cache controller.
 type ConfigStoreController interface {
+	// 配置缓存接口，提供了对Config资源的增、删、改、查功能
 	ConfigStore
 
 	// RegisterEventHandler adds a handler to receive config update events for a
 	// configuration type
+	// 注册事件处理函数，为每种类型的配置资源都注册事件处理函数
 	RegisterEventHandler(kind config.GroupVersionKind, handler EventHandler)
 
 	// Run until a signal is received.
 	// Run *should* block, so callers should typically call `go controller.Run(stop)`
+	// 运行控制器
 	Run(stop <-chan struct{})
 
 	// HasSynced returns true after initial cache synchronization is complete
+	// 配置缓存是否已同步
 	HasSynced() bool
 }
 

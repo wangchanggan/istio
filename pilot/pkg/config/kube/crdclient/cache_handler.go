@@ -76,16 +76,19 @@ func (h *cacheHandler) onEvent(old any, curr any, event model.Event) error {
 
 func (h *cacheHandler) callHandlers(old config.Config, curr config.Config, event model.Event) {
 	// TODO we may consider passing a pointer to handlers instead of the value. While spec is a pointer, the meta will be copied
+	// h.client.handlers是各种资源的处理函数集合，它是ConfigController通过initRegistryEventHandlers注册的
 	for _, f := range h.client.handlers[h.schema.GroupVersionKind()] {
 		f(old, curr, event)
 	}
 }
 
+// 每种Informer的事件回调处理函数均通过该方法注册
 func createCacheHandler(cl *Client, schema resource.Schema, i informers.GenericInformer) *cacheHandler {
 	scope.Debugf("registered CRD %v", schema.GroupVersionKind())
 	h := &cacheHandler{
-		client:   cl,
-		schema:   schema,
+		client: cl,
+		schema: schema,
+		// 创建一个带过滤器的Informer，可支持配置命名空间级隔离
 		informer: kclient.NewUntyped(cl.client, i.Informer(), kclient.Filter{ObjectFilter: cl.namespacesFilter}),
 	}
 
@@ -93,6 +96,7 @@ func createCacheHandler(cl *Client, schema resource.Schema, i informers.GenericI
 	h.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			incrementEvent(kind, "add")
+			// 当Config资源在Kubernetes中创建、更新和删除时，EventHandler创建任务对象并将其发送到任务队列中，然后由任务处理协程处理。
 			cl.queue.Push(func() error {
 				return h.onEvent(nil, obj, model.EventAdd)
 			})

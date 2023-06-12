@@ -902,6 +902,7 @@ func (s *Server) initRegistryEventHandlers() {
 	if s.configController != nil {
 		configHandler := func(prev config.Config, curr config.Config, event model.Event) {
 			defer func() {
+				// 状态报告
 				if event != model.EventDelete {
 					s.statusReporter.AddInProgressResource(curr)
 				} else {
@@ -910,23 +911,27 @@ func (s *Server) initRegistryEventHandlers() {
 			}()
 			log.Debugf("Handle event %s for configuration %s", event, curr.Key())
 			// For update events, trigger push only if spec has changed.
+			// 对于更新事件，仅当对象的spec发生变化时才触发xDS推送
 			if event == model.EventUpdate && !needsPush(prev, curr) {
 				log.Debugf("skipping push for %s as spec has not changed", prev.Key())
 				return
 			}
 			pushReq := &model.PushRequest{
+				// 触发xDS全量更新
 				Full:           true,
 				ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.MustFromGVK(curr.GroupVersionKind), Name: curr.Name, Namespace: curr.Namespace}),
 				Reason:         []model.TriggerReason{model.ConfigUpdate},
 			}
 			s.XDSServer.ConfigUpdate(pushReq)
 		}
+		// initRegistryEventHandlers初始化EventHandler
 		schemas := collections.Pilot.All()
 		if features.EnableGatewayAPI {
 			schemas = collections.PilotGatewayAPI().All()
 		}
 		for _, schema := range schemas {
 			// This resource type was handled in external/servicediscovery.go, no need to rehandle here.
+			// 下面三种类型在serviceentry controller中处理，这里不用为其注册事件处理函数
 			if schema.GroupVersionKind() == gvk.ServiceEntry {
 				continue
 			}
@@ -937,6 +942,7 @@ func (s *Server) initRegistryEventHandlers() {
 				continue
 			}
 
+			// 注册其他所有API对象的事件处理函数
 			s.configController.RegisterEventHandler(schema.GroupVersionKind(), configHandler)
 		}
 		if s.environment.GatewayAPIController != nil {

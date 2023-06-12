@@ -67,20 +67,26 @@ type Client struct {
 	domainSuffix string
 
 	// revision for this control plane instance. We will only read configs that match this revision.
+	// Istio的版本号，如果在配置中有revision，则客户端只读取与revision匹配的配置
 	revision string
 
 	// kinds keeps track of all cache handlers for known types
+	// 记录所有资源类型对应的Informer控制器
 	kinds   map[config.GroupVersionKind]*cacheHandler
 	kindsMu sync.RWMutex
-	queue   queue.Instance
+	// Config资源的事件处理队列，控制器单独启动一个Golang协程处理事件来处理队列中的Config
+	queue queue.Instance
 
 	// handlers defines a list of event handlers per-type
+	// 资源类型及对应的时间处理回调函数
 	handlers map[config.GroupVersionKind][]model.EventHandler
 
 	schemasByCRDName map[string]resource.Schema
-	client           kube.Client
-	crdWatcher       *crdwatcher.Controller
-	logger           *log.Scope
+	// 包含了Istio客户端，主要用于操作Istio API对象，以及Gateway API客户端，用于操作Kubernetes Gateway API对象
+	client kube.Client
+	// CRD Informer 监听CRD的创建
+	crdWatcher *crdwatcher.Controller
+	logger     *log.Scope
 
 	// namespacesFilter is only used to initiate filtered informer.
 	namespacesFilter func(obj interface{}) bool
