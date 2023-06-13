@@ -36,21 +36,26 @@ type ServiceHandler func(*Service, *Service, Event)
 // Handlers execute on the single worker queue in the order they are appended.
 // Handlers receive the notification event and the associated object.  Note
 // that all handlers must be appended before starting the controller.
+// 控制器接口，用于注册事件处理回调函数。具体的注册中心控制器会接收资源更新事件，并执行相应的事件处理回调函数。
 type Controller interface {
 	// Note: AppendXXXHandler is used to register high level handlers.
 	// For per cluster handlers, they should be registered by the `AppendXXXHandlerForCluster` interface.
 
 	// AppendServiceHandler notifies about changes to the service catalog.
+	// 注册服务的事件处理回调函数
 	AppendServiceHandler(f ServiceHandler)
 
 	// AppendWorkloadHandler notifies about changes to workloads. This differs from InstanceHandler,
 	// which deals with service instances (the result of a merge of Service and Workload)
+	// 注册服务实例的事件处理回调函数，主要是为了支持Kubernetes Service和Istio ServiceEntry交叉选择服务实例
 	AppendWorkloadHandler(f func(*WorkloadInstance, Event))
 
 	// Run until a signal is received
+	// 运行控制器
 	Run(stop <-chan struct{})
 
 	// HasSynced returns true after initial cache synchronization is complete
+	// 同步检查控制器的缓存
 	HasSynced() bool
 }
 

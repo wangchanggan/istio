@@ -222,28 +222,34 @@ var (
 // Controller is a collection of synchronized resource watchers
 // Caches are thread-safe
 type Controller struct {
+	// 控制器的属性配置
 	opts Options
-
+	// Kubernetes REST客户端
 	client kubelib.Client
-
+	// 控制器缓存资源更新事件的任务队列，控制器在运行时会启动一个独立的Golang协程阻塞式地接收任务并进行处理
 	queue queue.Instance
 
 	namespaces kclient.Client[*v1.Namespace]
 	services   kclient.Client[*v1.Service]
-
+	// Kubernetes的Endpoints控制器抽象接口，支持Endpoint和EndpointSlice
 	endpoints kubeEndpointsController
 
 	// Used to watch node accessible from remote cluster.
 	// In multi-cluster(shared control plane multi-networks) scenario, ingress gateway service can be of nodePort type.
 	// With this, we can populate mesh's gateway address with the node ips.
+	// Node的资源缓存及事件处理函数
 	nodes kclient.Client[*v1.Node]
 
 	crdWatcher *crdwatcher.Controller
-	exports    serviceExportCache
-	imports    serviceImportCache
-	pods       *PodCache
+	// 多集群服务ServiceExport的资源处理接口
+	exports serviceExportCache
+	// 多集群服务ServiceImport的资源处理接口
+	imports serviceImportCache
+	// Pod的资源缓存及事件处理函数
+	pods *PodCache
 
-	crdHandlers                []func(name string)
+	crdHandlers []func(name string)
+	// Service及Pod实例的事件处理函数
 	handlers                   model.ControllerHandlers
 	namespaceDiscoveryHandlers []func(ns string, event model.Event)
 
@@ -252,6 +258,7 @@ type Controller struct {
 
 	sync.RWMutex
 	// servicesMap stores hostname ==> service, it is used to reduce convertService calls.
+	// Istio服务模型的缓存
 	servicesMap map[host.Name]*model.Service
 	// nodeSelectorsForServices stores hostname => label selectors that can be used to
 	// refine the set of node port IPs for a service.
@@ -262,6 +269,7 @@ type Controller struct {
 	// Only nodes with ExternalIP addresses are included in this map !
 	nodeInfoMap map[string]kubernetesNode
 	// externalNameSvcInstanceMap stores hostname ==> instance, is used to store instances for ExternalName k8s services
+	// ExternalName类型的服务实例缓存
 	externalNameSvcInstanceMap map[host.Name][]*model.ServiceInstance
 	// index over workload instances from workload entries
 	workloadInstancesIndex workloadinstances.Index
@@ -340,6 +348,7 @@ func NewController(kubeClient kubelib.Client, options Options) *Controller {
 		ObjectFilter:    c.opts.DiscoveryNamespacesFilter.Filter,
 		ObjectTransform: kubelib.StripPodUnusedFields,
 	})
+	// Pod资源：Pod资源的回调处理函数在PodCache初始化时注册。
 	c.pods = newPodCache(c, c.podsClient, func(key types.NamespacedName) {
 		c.queue.Push(func() error {
 			return c.endpoints.sync(key.Name, key.Namespace, model.EventAdd, true)
@@ -543,6 +552,10 @@ func (c *Controller) buildEndpointsForService(svc *model.Service, updateCache bo
 	return endpoints
 }
 
+// Node资源：跨集群通信时，若没有软硬件负载均衡设备，则可以用NodePort类型的服务承载跨集群的流量。
+// 对于NodePort类型的服务，可以通过节点的IP地址及NodePort端口访问
+// 因此在集群没有ELB（弹性负载均衡）时，包含ExternalIP地址的节点可以充当东西向网关服务的访问入口。
+// 另外，服务实例的Locality信息均可从Node对象中自动获取，不需要应用本身做什么特殊标记。
 func (c *Controller) onNodeEvent(_, node *v1.Node, event model.Event) error {
 	var updatedNeeded bool
 	if event == model.EventDelete {
@@ -553,6 +566,7 @@ func (c *Controller) onNodeEvent(_, node *v1.Node, event model.Event) error {
 	} else {
 		k8sNode := kubernetesNode{labels: node.Labels}
 		for _, address := range node.Status.Addresses {
+			// 只处理包含ExternalIP地址的节点
 			if address.Type == v1.NodeExternalIP && address.Address != "" {
 				k8sNode.address = address.Address
 				break
@@ -565,6 +579,8 @@ func (c *Controller) onNodeEvent(_, node *v1.Node, event model.Event) error {
 		c.Lock()
 		// check if the node exists as this add event could be due to controller resync
 		// if the stored object changes, then fire an update event. Otherwise, ignore this event.
+		// 检查节点是否已在缓存中，并且将新的节点对象与缓存中的节点对象进行比较。
+		// 如果新对象有变化，则可能需要需要触发全量的xDS更新
 		currentNode, exists := c.nodeInfoMap[node.Name]
 		if !exists || !nodeEquals(currentNode, k8sNode) {
 			c.nodeInfoMap[node.Name] = k8sNode
@@ -574,7 +590,9 @@ func (c *Controller) onNodeEvent(_, node *v1.Node, event model.Event) error {
 	}
 
 	// update all related services
+	// 更新Gateway地址
 	if updatedNeeded && c.updateServiceNodePortAddresses() {
+		// 触发全量的xDS更新
 		c.opts.XDSUpdater.ConfigUpdate(&model.PushRequest{
 			Full:   true,
 			Reason: []model.TriggerReason{model.ServiceUpdate},

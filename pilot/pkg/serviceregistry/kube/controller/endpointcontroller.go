@@ -47,13 +47,20 @@ type kubeEndpointsController interface {
 }
 
 // processEndpointEvent triggers the config update.
+// Endpoint资源：主要根据集群所使用的Endpoint模式的不同，将Endpoint交由Endpoint控制器处理，将Endpointslice交由EndpointSlice控制器处理。
+// Endpoint事件处理函数没有在外部注册，而是由内置函数调用XDSUpdater接口完成。
+// 对Headless服务的Endpoint的处理比较特殊，这里会触发全量的xDS更新。
+// 与普通的ClusterlP类型的服务共享一个监听器不同，Headless服务的xDS模型比较特殊，它的每个服务实例都可能对应一个监听器。
+// 在这种情况下，Headless服务实例的更新必然引起xDS监听器的变化。
 func processEndpointEvent(c *Controller, epc kubeEndpointsController, name string, namespace string, event model.Event, ep any) error {
 	// Update internal endpoint cache no matter what kind of service, even headless service.
 	// As for gateways, the cluster discovery type is `EDS` for headless service.
+	// 更新Endpoint缓存，触发xDS更新
 	updateEDS(c, epc, ep, event)
 	if svc := c.services.Get(name, namespace); svc != nil {
 		// if the service is headless service, trigger a full push if EnableHeadlessService is true,
 		// otherwise push endpoint updates - needed for NDS output.
+		// 如果是Headless服务，则触发全量的xDS更新
 		if svc.Spec.ClusterIP == v1.ClusterIPNone {
 			for _, modelSvc := range c.servicesForNamespacedName(config.NamespacedName(svc)) {
 				c.opts.XDSUpdater.ConfigUpdate(&model.PushRequest{

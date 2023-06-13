@@ -41,18 +41,24 @@ var (
 )
 
 // Controller aggregates data across different registries and monitors for changes
+// 聚合所有底层注册中心的数据，并监控数据的变化
 type Controller struct {
+	// Meshconfiguration的容器
 	meshHolder mesh.Holder
 
 	// The lock is used to protect the registries and controller's running status.
-	storeLock  sync.RWMutex
+	storeLock sync.RWMutex
+	// 注册中心的集合
 	registries []*registryEntry
 	// indicates whether the controller has run.
 	// if true, all the registries added later should be run manually.
 	running bool
 
-	handlers          model.ControllerHandlers
+	// 控制器回调函数的集合，当添加了某一注册中心时，控制器会向其注册回调函数
+	handlers model.ControllerHandlers
+	// 按照集群区分的回调函数
 	handlersByCluster map[cluster.ID]*model.ControllerHandlers
+	// Gateway的处理函数，在东西向网关地址发生变化时触发
 	model.NetworkGatewaysHandler
 }
 

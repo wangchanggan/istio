@@ -732,13 +732,16 @@ func (s *ServiceAttributes) Equals(other *ServiceAttributes) bool {
 
 // ServiceDiscovery enumerates Istio service instances.
 // nolint: lll
+// 服务发现接口提供对服务模型的查询功能
 type ServiceDiscovery interface {
 	NetworkGatewaysWatcher
 
 	// Services list declarations of all services in the system
+	// 查询网格中的所有服务
 	Services() []*Service
 
 	// GetService retrieves a service by host name if it exists
+	// 根据hostname查询服务
 	GetService(hostname host.Name) *Service
 
 	// InstancesByPort retrieves instances for a service on the given ports with labels that match
@@ -763,6 +766,7 @@ type ServiceDiscovery interface {
 	// CDS (clusters.go) calls it for building 'dnslb' type clusters.
 	// EDS calls it for building the endpoints result.
 	// Consult istio-dev before using this for anything else (except debugging/tools)
+	// 根据服务、端口号及标签获取服务实例
 	InstancesByPort(svc *Service, servicePort int) []*ServiceInstance
 
 	// GetProxyServiceInstances returns the service instances that co-located with a given Proxy
@@ -782,12 +786,15 @@ type ServiceDiscovery interface {
 	// though with a different ServicePort and IstioEndpoint for each.  If any of these overlapping
 	// services are not HTTP or H2-based, behavior is undefined, since the listener may not be able to
 	// determine the intended destination of a connection without a Host header on the request.
+	// 获取与Sidecar代理相关的服务实例
 	GetProxyServiceInstances(*Proxy) []*ServiceInstance
+	// 获取Proxy工作负载的标签
 	GetProxyWorkloadLabels(*Proxy) labels.Instance
 
 	// MCSServices returns information about the services that have been exported/imported via the
 	// Kubernetes Multi-Cluster Services (MCS) ServiceExport API. Only applies to services in
 	// Kubernetes clusters.
+	// 获取Muliticluster Service, 与MCS相关，如果未启用MCS支持，则可以不关注
 	MCSServices() []MCSServiceInfo
 	AmbientIndexes
 }
