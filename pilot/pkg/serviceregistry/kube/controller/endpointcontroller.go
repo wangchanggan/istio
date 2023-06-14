@@ -52,6 +52,9 @@ type kubeEndpointsController interface {
 // 对Headless服务的Endpoint的处理比较特殊，这里会触发全量的xDS更新。
 // 与普通的ClusterlP类型的服务共享一个监听器不同，Headless服务的xDS模型比较特殊，它的每个服务实例都可能对应一个监听器。
 // 在这种情况下，Headless服务实例的更新必然引起xDS监听器的变化。
+// Endpoint的处理函数内置，不需要从外部注册，这是因为Istio 1.0引入了增量EDS的优化，目前增量EDS只支持Kubernetes平台。
+// 它根据Endpoint 的变化更新与服务相关的缓存，并判断本次Endpoint资源的更新是否需要全量的xDS配置分发。
+// 在服务网格中变化最多、最快的往往是Endpoint，因此增量EDS的更新能够大大降低系统的资源(CPU、内存、带宽)开销，提高服务网格的稳定性。
 func processEndpointEvent(c *Controller, epc kubeEndpointsController, name string, namespace string, event model.Event, ep any) error {
 	// Update internal endpoint cache no matter what kind of service, even headless service.
 	// As for gateways, the cluster discovery type is `EDS` for headless service.
@@ -93,9 +96,11 @@ func updateEDS(c *Controller, epc kubeEndpointsController, ep any, event model.E
 		if forgottenEndpointsByHost != nil {
 			endpoints = forgottenEndpointsByHost[hostName]
 		} else {
+			// 生成IstioEndpoint
 			endpoints = epc.buildIstioEndpoints(ep, hostName)
 		}
 
+		// Kubernetes服务选择Workload Entries，支持混合部署
 		if features.EnableK8SServiceSelectWorkloadEntries {
 			svc := c.GetService(hostName)
 			if svc != nil {
@@ -107,6 +112,7 @@ func updateEDS(c *Controller, epc kubeEndpointsController, ep any, event model.E
 			}
 		}
 
+		// 调用EDSUpdate进行EDS的缓存更新及触发xDS更新，XDSServer实现了XDSUpdater接口。
 		c.opts.XDSUpdater.EDSUpdate(shard, string(hostName), namespacedName.Namespace, endpoints)
 	}
 }

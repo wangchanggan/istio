@@ -454,15 +454,21 @@ func (c *Controller) Cleanup() error {
 	return nil
 }
 
+// 在Service资源更新时，由Kube Controller的任务队列执行onServiceEvent接口调用，触发serviceHandler的执行。
+// onServiceEvent还会执行必要的服务转换，将Kubernetes服务转换成Istio服务并且更新缓存。
+// Kube Controller 缓存的主要作用是提供对ServiceDiscovery接口的查询。
 func (c *Controller) onServiceEvent(_, curr *v1.Service, event model.Event) error {
 	log.Debugf("Handle event %s for service %s in namespace %s", event, curr.Name, curr.Namespace)
 
 	// Create the standard (cluster.local) service.
+	// 将Kubernetes服务转换成Istio服务
 	svcConv := kube.ConvertService(*curr, c.opts.DomainSuffix, c.Cluster())
 	switch event {
 	case model.EventDelete:
+		// 删除服务
 		c.deleteService(svcConv)
 	default:
+		// 更新或者创建服务
 		c.addOrUpdateService(curr, svcConv, event, false)
 	}
 
@@ -1247,7 +1253,9 @@ func (c *Controller) GetProxyWorkloadLabels(proxy *model.Proxy) labels.Instance 
 }
 
 // AppendServiceHandler implements a service catalog operation
+// 注册Service事件处理函数
 func (c *Controller) AppendServiceHandler(f model.ServiceHandler) {
+	// 将serviceHandler注册到控制器
 	c.handlers.AppendServiceHandler(f)
 }
 

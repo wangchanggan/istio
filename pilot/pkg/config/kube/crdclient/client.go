@@ -190,6 +190,8 @@ func NewForSchemas(client kube.Client, opts Option, schemas collection.Schemas) 
 	return out, nil
 }
 
+// ConfigStoreCache RegisterEventHandler的方法实现，为每种类型的资源分别注册回调处理
+// 入参handler处理函数就是XDSServer在初始化initRegistryEventHandlers时注册的事件处理函数configHander
 func (cl *Client) RegisterEventHandler(kind config.GroupVersionKind, handler model.EventHandler) {
 	cl.handlers[kind] = append(cl.handlers[kind], handler)
 }

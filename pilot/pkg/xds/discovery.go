@@ -334,6 +334,7 @@ func (s *DiscoveryServer) globalPushContext() *model.PushContext {
 }
 
 // ConfigUpdate implements ConfigUpdater interface, used to request pushes.
+// XDSServer接口
 func (s *DiscoveryServer) ConfigUpdate(req *model.PushRequest) {
 	if len(model.ConfigsOfKind(req.ConfigsUpdated, kind.Address)) > 0 {
 		// This is a bit like clearing EDS cache on EndpointShard update. Because Address

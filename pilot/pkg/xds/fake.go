@@ -141,7 +141,6 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 		s.pushQueue.ShutDown()
 	})
 
-	// Service资源：通过Service控制器的AppendServiceHandler方法注册服务变化处理函数serviceHandler，进而触发全量的xDS分发。
 	serviceHandler := func(_, curr *model.Service, _ model.Event) {
 		pushReq := &model.PushRequest{
 			Full:           true,

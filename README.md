@@ -9,7 +9,18 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
     -   [Pilot](#pilot)
         -   [启动流程](#启动流程)
         -   [ConfigController](#configcontroller)
+            -   [核心接口](#核心接口)
+            -   [初始化](#初始化)
+            -   [核心工作机制](#核心工作机制)
         -   [ServiceController](#servicecontroller)
+            -   [核心接口](#核心接口-1)
+            -   [初始化流程](#初始化流程)
+            -   [工作机制](#工作机制)
+        -   [xDS的异步分发](#xds的异步分发)
+            -   [任务处理函数的注册](#任务处理函数的注册)
+            -   [Config控制器的任务处理流程](#config控制器的任务处理流程)
+            -   [Service控制器的任务处理流程](#service控制器的任务处理流程)
+            -   [资源更新事件处理：xDS分发](#资源更新事件处理xds分发)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -27,11 +38,13 @@ pilot/pkg/bootstrap/server.go:103
 
 ### ConfigController
 ConfigController（配置资源控制器）主要用于监听注册中心的配置资源，在内存中缓存监听到的所有配置资源，并在 Config 资源更新时调用注册的事件处理函数。由于需要支持多注册中心，因此ConfigController实际上是多个控制器的集合。
+
 #### 核心接口
 pilot/pkg/model/config.go:212,153
+
 #### 初始化
 
-![](/docs/images/configController_init.png)
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/configController_init.png)
 
 pilot/pkg/bootstrap/configcontroller.go:61,135,346
 
@@ -39,14 +52,15 @@ pilot/pkg/config/kube/crdclient/client.go:61
 
 另外，虽然Istio没有适配器可直接对接其他注册中心，但Istio提供了可扩展的接口协议MCP，方便用户集成其他第三方注册中心。MCP ConfigController与Kubernetes ConfigController基本类似，均实现了ConfigStoreController接口，支持Istio配置资源的发现，并提供了缓存管理功能。在创建MCP ConfigController时需要通过MeshConfig.ConfigSources指定MCP服务器的地址。
 
-![](/docs/images/MCP_configController_init.png)
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/MCP_configController_init.png)
 
 pilot/pkg/bootstrap/configcontroller.go:211
+
 #### 核心工作机制
-![](/docs/images/CRD_operator_process.png)
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/CRD_operator_process.png)
 pilot/pkg/config/kube/crdclient/cache_handler.go:86,40,77
 
-pilot/pkg/bootstrap/server.go:903
+pilot/pkg/bootstrap/server.go:907
 
 完整的Config事件处理流程:
 
@@ -56,10 +70,11 @@ pilot/pkg/bootstrap/server.go:903
 
 （3）任务处理协程阻塞式地读取任务队列，执行任务，通过onEvent方法处理事件，并通过configHandler触发xDS的更新。
 
-![](/docs/images/config_event_handling.png)
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/config_event_handling.png)
 
 ### ServiceController
 ServiceController（服务控制器）是服务发现的核心模块，主要功能是监听底层平台的服务注册中心，将平台服务模型转换成Istio服务模型并缓存；同时根据服务的变化，触发相关服务的事件处理回调函数的执行。
+
 #### 核心接口
 ServiceController对外为DiscoveryServer中的XDSServer提供了通用的服务模型查询接口ServiceDiscovery。ServiceController可以同时支持多个服务注册中心，因为它包含不同的注册中心控制器，它们的聚合是通过抽象聚合接口（aggregate.Controller）完成的。
 
@@ -70,28 +85,63 @@ pilot/pkg/serviceregistry/instance.go:26
 pilot/pkg/model/controller.go:40
 
 pilot/pkg/model/service.go:736
+
 #### 初始化流程
 
-![](/docs/images/serviceController_init.png)
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/serviceController_init.png)
 
 pilot/pkg/serviceregistry/kube/controller/controller.go:224
 
 Kubernetes控制器的核心就是监听Kubernetes相关资源(Service、Endpoint、EndpointSlice、Pod、Node) 的更新事件，执行相应的事件处理回调函数；并且进行从Kubernetes资源对象到Istio资源对象的转换，提供一定的缓存能力，主要是缓存Istio Service与WorkloadInstance。
 
-![](/docs/images/k8s_controller_keyAttributes_init.png)
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/k8s_controller_keyAttributes_init.png)
 
 其中，Kubernetes控制器主要负责对4种资源的监听和处理，对于每种类型的资源，控制器分别启动了独立的Informer负责List-Watch, 并且分别注册了不同类型的事件处理函数（onServiceEvent、onPodEvent、onNodeEvent、onEvent）到队列中。
+
 #### 工作机制
 ServiceController为4种资源分别创建了Kubernetes Informer，用于监听Kubernetes资源的更新，并为其注册EventHandler。
 
-![](/docs/images/serviceController_informer.png)
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/serviceController_informer.png)
 
 当监听到Service、Endpoint、Pod、Node资源更新时，EventHandler 会创建资源处理任务并将其推送到任务队列，然后由任务处理协程阻塞式地接收任务对象，最终调用任务处理函数完成对资源对象的事件处理。
 
-![](/docs/images/serviceController_event_handling.png)
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/serviceController_event_handling.png)
 
-pilot/pkg/xds/fake.go:145
+pilot/pkg/bootstrap/server.go:888
 
-pilot/pkg/serviceregistry/kube/controller/endpointcontroller.go:55
+pilot/pkg/serviceregistry/kube/controller/endpointcontroller.go:58
 
 pilot/pkg/serviceregistry/kube/controller/controller.go:352
+
+### xDS的异步分发
+#### 任务处理函数的注册
+Pilot通过XDSServer处理客户端的订阅请求，并完成xDS配置的生成与下发，而XDSServer的初始化由NewServer完成，因此从实现的角度考虑，将Istio任务处理函数的注册也放在了XDSServer对象的初始化流程中。
+
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/istio_task_process_func_register.png)
+
+其中，Config事件处理函数通过配置控制器的RegisterEventHandler方法注册，Service事件处理函数通过model.Controllcr.AppendServiceHandler方法注册。
+
+#### Config控制器的任务处理流程
+pilot/pkg/config/kube/crdclient/client.go:195
+
+pilot/pkg/bootstrap/server.go:907
+
+pilot/pkg/xds/discovery.go:338
+
+#### Service控制器的任务处理流程
+pilot/pkg/serviceregistry/kube/controller/controller.go:1257
+
+pilot/pkg/bootstrap/server.go:888
+
+pilot/pkg/serviceregistry/kube/controller/controller.go:460
+
+pilot/pkg/serviceregistry/kube/controller/endpointcontroller.go:58,84
+
+pilot/pkg/xds/eds.go:65,101
+
+#### 资源更新事件处理：xDS分发
+从根本上讲，Config、Service、Endpoint对资源的处理最后都是通过调用ConfigUpdate方法向XDSServer的pushChannel队列发送PushRequest实现的。
+
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/xDS_distribute.png)
+
+XDSServer首先通过handleUpdates线程阻塞式地接收并处理更新请求，并将PushRequest发送到XDSServer的pushQueue中，然后由sendPushes线程并发地将PushRequest发送给每一条连接的pushChannel，最后由XDSServer的流处理接口处理分发请求。

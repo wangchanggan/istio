@@ -883,6 +883,8 @@ func (s *Server) cachesSynced() bool {
 func (s *Server) initRegistryEventHandlers() {
 	log.Info("initializing registry event handlers")
 	// Flush cached discovery responses whenever services configuration change.
+	// Service资源：通过Service控制器的AppendServiceHandler方法注册服务变化处理函数serviceHandler，进而触发全量的xDS分发。
+	// Service事件处理函数
 	serviceHandler := func(prev, curr *model.Service, event model.Event) {
 		needsPush := true
 		if event == model.EventUpdate {
@@ -894,12 +896,14 @@ func (s *Server) initRegistryEventHandlers() {
 				ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.ServiceEntry, Name: string(curr.Hostname), Namespace: curr.Attributes.Namespace}),
 				Reason:         []model.TriggerReason{model.ServiceUpdate},
 			}
+			// 触发xDS推送
 			s.XDSServer.ConfigUpdate(pushReq)
 		}
 	}
 	s.ServiceController().AppendServiceHandler(serviceHandler)
 
 	if s.configController != nil {
+		// Config的回调处理函数
 		configHandler := func(prev config.Config, curr config.Config, event model.Event) {
 			defer func() {
 				// 状态报告
@@ -922,6 +926,7 @@ func (s *Server) initRegistryEventHandlers() {
 				ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.MustFromGVK(curr.GroupVersionKind), Name: curr.Name, Namespace: curr.Namespace}),
 				Reason:         []model.TriggerReason{model.ConfigUpdate},
 			}
+			// 触发xDS推送
 			s.XDSServer.ConfigUpdate(pushReq)
 		}
 		// initRegistryEventHandlers初始化EventHandler

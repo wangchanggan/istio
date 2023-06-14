@@ -67,9 +67,11 @@ func (s *DiscoveryServer) EDSUpdate(shard model.ShardKey, serviceName string, na
 ) {
 	inboundEDSUpdates.Increment()
 	// Update the endpoint shards
+	// 更新EDS缓存
 	pushType := s.edsCacheUpdate(shard, serviceName, namespace, istioEndpoints)
 	if pushType == IncrementalPush || pushType == FullPush {
 		// Trigger a push
+		// 触发xDS更新
 		s.ConfigUpdate(&model.PushRequest{
 			Full:           pushType == FullPush,
 			ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.ServiceEntry, Name: serviceName, Namespace: namespace}),
@@ -104,6 +106,9 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 		// but we should not delete the keys from EndpointIndex map - that will trigger
 		// unnecessary full push which can become a real problem if a pod is in crashloop and thus endpoints
 		// flip flopping between 1 and 0.
+		// 在Endpoint变为0时，应该删除服务的EndpointShard
+		// 但是我们不能删除EndpointIndex Map中的键值，因为假如这时Pod状态在Crash Loop和Ready之间跳变
+		// 就会引起不必要、频繁的、全量的xDS更新
 		s.Env.EndpointIndex.DeleteServiceShard(shard, hostname, namespace, true)
 		log.Infof("Incremental push, service %s at shard %v has no endpoints", hostname, shard)
 		return IncrementalPush
@@ -111,8 +116,10 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 
 	pushType := IncrementalPush
 	// Find endpoint shard for this service, if it is available - otherwise create a new one.
+	// 找到服务的EndpointShard，如果不存在，则创建一个新的
 	ep, created := s.Env.EndpointIndex.GetOrCreateEndpointShard(hostname, namespace)
 	// If we create a new endpoint shard, that means we have not seen the service earlier. We should do a full push.
+	// 如果新创建了EndpointShard，则需要触发全量的xDS更新
 	if created {
 		log.Infof("Full push, new service %s/%s", namespace, hostname)
 		pushType = FullPush
@@ -121,6 +128,7 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 	ep.Lock()
 	defer ep.Unlock()
 	newIstioEndpoints := istioEndpoints
+	// 支持发送Unhealthy Endpoints
 	if features.SendUnhealthyEndpoints.Load() {
 		oldIstioEndpoints := ep.Shards[shard]
 		newIstioEndpoints = make([]*model.IstioEndpoint, 0, len(istioEndpoints))
@@ -144,6 +152,8 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 		for _, nie := range istioEndpoints {
 			if oie, exists := emap[nie.Address]; exists {
 				// If endpoint exists already, we should push if it's health status changes.
+				// 如果Endpoint存在，则这里判断其健康状态是否发生了变化，
+				// 仅在发生变化时才需要进行xDS推送
 				if oie.HealthStatus != nie.HealthStatus {
 					needPush = true
 				}
@@ -152,12 +162,14 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 				// If the endpoint does not exist in shards that means it is a
 				// new endpoint. Only send if it is healthy to avoid pushing endpoints
 				// that are not ready to start with.
+				// 如果Endpoint原来不存在，则仅当其健康时进行xDS推送
 				needPush = true
 				newIstioEndpoints = append(newIstioEndpoints, nie)
 			}
 		}
 		// Next, check for endpoints that were in old but no longer exist. If there are any, there is a
 		// removal so we need to push an update.
+		// 如果检查到Endpoint原来存在，但是现在被删除了，则这时也需要进行xDS推送
 		for _, oie := range oldIstioEndpoints {
 			if _, f := nmap[oie.Address]; !f {
 				needPush = true
@@ -174,6 +186,7 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 	ep.Shards[shard] = newIstioEndpoints
 
 	// Check if ServiceAccounts have changed. We should do a full push if they have changed.
+	// 检查ServiceAccount的变化
 	saUpdated := s.UpdateServiceAccount(ep, hostname)
 
 	// For existing endpoints, we need to do full push if service accounts change.
@@ -190,6 +203,7 @@ func (s *DiscoveryServer) edsCacheUpdate(shard model.ShardKey, hostname string, 
 	// moving forward in version. In practice, this is pretty rare and self corrects nearly
 	// immediately. However, clearing the cache here has almost no impact on cache performance as we
 	// would clear it shortly after anyways.
+	// 清空xDSCache
 	s.Cache.Clear(sets.New(model.ConfigKey{Kind: kind.ServiceEntry, Name: hostname, Namespace: namespace}))
 
 	return pushType
