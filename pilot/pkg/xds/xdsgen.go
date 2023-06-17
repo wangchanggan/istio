@@ -93,10 +93,12 @@ func (s *DiscoveryServer) findGenerator(typeURL string, con *Connection) model.X
 // Push an XDS resource for the given connection. Configuration will be generated
 // based on the passed in generator. Based on the updates field, generators may
 // choose to send partial or even no response if there are no changes.
+// pushXds首先主要根据订阅的资源类型找到对应的xDS生成器，然后通过生成器生成相应的xDS配置，最后通过send接口发送出去。
 func (s *DiscoveryServer) pushXds(con *Connection, w *model.WatchedResource, req *model.PushRequest) error {
 	if w == nil {
 		return nil
 	}
+	// 获取xDS生成器
 	gen := s.findGenerator(w.TypeUrl, con)
 	if gen == nil {
 		return nil
@@ -118,6 +120,7 @@ func (s *DiscoveryServer) pushXds(con *Connection, w *model.WatchedResource, req
 			ResourceNames: req.Delta.Subscribed.UnsortedList(),
 		}
 	}
+	// xDS生成器生成xDS配置
 	res, logdata, err := gen.Generate(con.proxy, w, req)
 	info := ""
 	if len(logdata.AdditionalInfo) > 0 {
@@ -162,6 +165,7 @@ func (s *DiscoveryServer) pushXds(con *Connection, w *model.WatchedResource, req
 		ptype = "PUSH INC"
 	}
 
+	// 调用send方法将xDS响应发送出去
 	if err := con.send(resp); err != nil {
 		if recordSendError(w.TypeUrl, err) {
 			log.Warnf("%s: Send failure for node:%s resources:%d size:%s%s: %v",

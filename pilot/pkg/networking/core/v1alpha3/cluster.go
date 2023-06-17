@@ -145,34 +145,46 @@ func (configgen *ConfigGeneratorImpl) BuildDeltaClusters(proxy *model.Proxy, upd
 	return clusters, deletedClusters, log, true
 }
 
-// buildClusters builds clusters for the proxy with the services passed.
+// buildClusters builds clusters for the proxy with the services passed.\
+// CDS配置的生成通过ConfigGenerator.BuildClusters方法完成。
+// generateRawClusters通过ConfigGenerator.BuildClusters方法生成原始的Cluster配置。
 func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *model.PushRequest,
 	services []*model.Service,
 ) ([]*discovery.Resource, model.XdsLogDetails) {
 	clusters := make([]*cluster.Cluster, 0)
 	resources := model.Resources{}
 	envoyFilterPatches := req.Push.EnvoyFilters(proxy)
+	// 创建Cluster生成器
 	cb := NewClusterBuilder(proxy, req, configgen.Cache)
 	instances := proxy.ServiceInstances
 	cacheStats := cacheStats{}
+	// 根据代理类型的不同，Cluster配置的生成方式也不同
+	// 直观上最大的区别是router类型的代理即Gateway，没有Inbound Cluster
+	// 因为网关一般都独立部署在集群或者网格的边缘，代理客户端的流量并将其转发到后端服务器。
 	switch proxy.Type {
-	case model.SidecarProxy:
+	case model.SidecarProxy: // 生成Sidecar Proxy Cluster
 		// Setup outbound clusters
+		// 构建Outbound Cluster
 		outboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_OUTBOUND}
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, outboundPatcher, services)
 		cacheStats = cacheStats.merge(cs)
 		resources = append(resources, ob...)
 		// Add a blackhole and passthrough cluster for catching traffic to unresolved routes
+		// 添加blackhole或者passthrough Cluster，为默认的路由转发流量
 		clusters = outboundPatcher.conditionallyAppend(clusters, nil, cb.buildBlackHoleCluster(), cb.buildDefaultPassthroughCluster())
+		// Outbound Cluster打补丁
 		clusters = append(clusters, outboundPatcher.insertedClusters()...)
 		// Setup inbound clusters
+		// 构建Inbound Cluster
 		inboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_INBOUND}
 		clusters = append(clusters, configgen.buildInboundClusters(cb, proxy, instances, inboundPatcher)...)
 		if proxy.EnableHBONE() {
 			clusters = append(clusters, configgen.buildInboundHBONEClusters())
 		}
 		// Pass through clusters for inbound traffic. These cluster bind loopback-ish src address to access node local service.
+		// 添加Passthrough Cluster，为默认的路由转发流量
 		clusters = inboundPatcher.conditionallyAppend(clusters, nil, cb.buildInboundPassthroughClusters()...)
+		// Inbound Cluster打补丁
 		clusters = append(clusters, inboundPatcher.insertedClusters()...)
 	case model.Waypoint:
 		svcs := findWaypointServices(proxy, req.Push)
@@ -185,12 +197,13 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 		inboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_INBOUND}
 		clusters = append(clusters, configgen.buildWaypointInboundClusters(cb, proxy, req.Push, svcs)...)
 		clusters = append(clusters, inboundPatcher.insertedClusters()...)
-	default: // Gateways
+	default: // Gateways // 生成Gateway Cluster
 		patcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_GATEWAY}
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, patcher, services)
 		cacheStats = cacheStats.merge(cs)
 		resources = append(resources, ob...)
 		// Gateways do not require the default passthrough cluster as they do not have original dst listeners.
+		// Gateways 不需要默认的passthrough Cluster，因为它没有原始目标地址监听器
 		clusters = patcher.conditionallyAppend(clusters, nil, cb.buildBlackHoleCluster())
 		if proxy.Type == model.Router && proxy.MergedGateway != nil && proxy.MergedGateway.ContainsAutoPassthroughGateways {
 			clusters = append(clusters, configgen.buildOutboundSniDnatClusters(proxy, req, patcher)...)
@@ -210,6 +223,7 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 	for _, c := range clusters {
 		resources = append(resources, &discovery.Resource{Name: c.Name, Resource: protoconv.MessageToAny(c)})
 	}
+	// Cluster 去重
 	resources = cb.normalizeClusters(resources)
 
 	if cacheStats.empty() {

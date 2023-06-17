@@ -26,6 +26,7 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
             -   [XDSServer的缓存更新](#xdsserver的缓存更新)
             -   [PushContext（推送上下文）的初始化](#pushcontext推送上下文的初始化)
             -   [Pilot-push事件的发送及井发控制](#pilot-push事件的发送及井发控制)
+        -   [xDS配置的生成及分发](#xds配置的生成及分发)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -173,3 +174,12 @@ pilot/pkg/model/push_context.go:198,1179
 pilot/pkg/xds/discovery.go:482
 
 ![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/pilot_push_events_and_concurrency_control.png)
+
+### xDS配置的生成及分发
+pilot/pkg/xds/ads.go:738
+
+pilot/pkg/xds/xdsgen.go:97
+
+Pilot主要负责6种xDS配置资源CDS、EDS、LDS、RDS、ECDS、NDS的生成及下发。以CDS生成器为例，XDSServer根据代理的属性及PushContext缓存生成原始的Cluster配置。
+
+pilot/pkg/networking/core/v1alpha3/cluster.go:151

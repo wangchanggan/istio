@@ -733,14 +733,18 @@ func (s *DiscoveryServer) DeltaAggregatedResources(stream discovery.AggregatedDi
 }
 
 // Compute and send the new configuration for a connection.
+// 异步xDS配置的分发任务由StreamAggregatedResources接口的push处理模块异步处理。
+// Push处理模块异步阻塞式地接收pusChannel中的XdsEvent事件，然后通过DicoveryServer.pushConnection方法向所有已连接的Envoy代理发送xDS配置。
 func (s *DiscoveryServer) pushConnection(con *Connection, pushEv *Event) error {
 	pushRequest := pushEv.pushRequest
 
 	if pushRequest.Full {
 		// Update Proxy with current information.
+		// 更新Proxy的状态
 		s.computeProxyState(con.proxy, pushRequest)
 	}
 
+	// 根据资源的变化情况，判断是否需要为Proxy更新xDS
 	if !s.ProxyNeedsPush(con.proxy, pushRequest) {
 		log.Debugf("Skipping push to %v, no updates required", con.conID)
 		if pushRequest.Full {
@@ -752,8 +756,10 @@ func (s *DiscoveryServer) pushConnection(con *Connection, pushEv *Event) error {
 
 	// Send pushes to all generators
 	// Each Generator is responsible for determining if the push event requires a push
+	// 遍历Proxy监听的资源类型
 	wrl, ignoreEvents := con.pushDetails()
 	for _, w := range wrl {
+		// 发送到Proxy
 		if err := s.pushXds(con, w, pushRequest); err != nil {
 			return err
 		}
