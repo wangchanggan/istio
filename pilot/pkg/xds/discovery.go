@@ -357,6 +357,9 @@ func (s *DiscoveryServer) handleUpdates(stopCh <-chan struct{}) {
 }
 
 // The debounce helper function is implemented to enable mocking
+// 在通过最小静默时间（PILOT_DEBOUNCE_AFTER )和并事新事件的同时，通过最大延迟时间（PILOT_DEBOUNCE_MAX)控制xDS配置下发的时延。
+// 两者是性能与时延的博弈，在实际生产环境下需要配合调优共同为服务网格的性能及稳定性服务。
+// 由于在DiscoveryServer.Push需要初始化Push.Context，会消耗大量内存，使用为了避免OOM，在debounce中存在大量的代码逻辑来保证DiscoveryServer.Puch串行地执行。
 func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts debounceOptions, pushFn func(req *model.PushRequest), updateSent *atomic.Int64) {
 	var timeChan <-chan time.Time
 	var startDebounce time.Time
@@ -382,6 +385,9 @@ func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts debounceO
 		eventDelay := time.Since(startDebounce)
 		quietTime := time.Since(lastConfigUpdateTime)
 		// it has been too long or quiet enough
+		// 当以下两个条件满足任意一个时,进行更新事件处理
+		//（1）距离本轮第1次更新事件超过最大延迟时间
+		//(2）距离上次更新时间超过最大静默时间
 		if eventDelay >= opts.debounceMax || quietTime >= opts.debounceAfter {
 			if req != nil {
 				pushCounter++
@@ -400,6 +406,7 @@ func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts debounceO
 				debouncedEvents = 0
 			}
 		} else {
+			// 启动定时器，定时长度为最小静默时间
 			timeChan = time.After(opts.debounceAfter - quietTime)
 		}
 	}
@@ -416,6 +423,7 @@ func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts debounceO
 			}
 			if !opts.enableEDSDebounce && !r.Full {
 				// trigger push now, just for EDS
+				// 立即触发EDS推送
 				go func(req *model.PushRequest) {
 					pushFn(req)
 					updateSent.Inc()
@@ -425,7 +433,9 @@ func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts debounceO
 
 			lastConfigUpdateTime = time.Now()
 			if debouncedEvents == 0 {
+				// 启动新一轮的配置下发定时器，定时长度为最小静默时间
 				timeChan = time.After(opts.debounceAfter)
+				// 记录第1次事件更新的时间
 				startDebounce = lastConfigUpdateTime
 			}
 			debouncedEvents++
@@ -467,6 +477,8 @@ func reasonsUpdated(req *model.PushRequest) string {
 	}
 }
 
+// push事件的发送面向所有xDS客户端，即Sidecar代理，并且具有一定的并发控制功能。
+// Pilot利用Golang Channel设计了一个简易的并发控制器，防止因为并发度过高，push处理模块消费过慢，导致发送端的Golang协程暴涨、不受控制。
 func doSendPushes(stopCh <-chan struct{}, semaphore chan struct{}, queue *PushQueue) {
 	for {
 		select {
@@ -484,6 +496,7 @@ func doSendPushes(stopCh <-chan struct{}, semaphore chan struct{}, queue *PushQu
 			}
 			recordPushTriggers(push.Reason...)
 			// Signals that a push is done by reading from the semaphore, allowing another send on it.
+			// 每个客户端在通过pushConnection将本次xDS推送完毕后，都会调用MarkDone函数，主要目的是通知并发控制器。
 			doneFunc := func() {
 				queue.MarkDone(client)
 				<-semaphore
@@ -496,6 +509,8 @@ func doSendPushes(stopCh <-chan struct{}, semaphore chan struct{}, queue *PushQu
 			} else {
 				closed = client.deltaStream.Context().Done()
 			}
+			// 如果并发控制器允许，则为每个客户端都启动一个发送协程，尝试向其队列pushChannel发送xDS Event。
+			// 如果此客户端正在进行配置的生成及分发，则发送阻塞。
 			go func() {
 				pushEv := &Event{
 					pushRequest: push,
@@ -506,6 +521,7 @@ func doSendPushes(stopCh <-chan struct{}, semaphore chan struct{}, queue *PushQu
 				case client.pushChannel <- pushEv:
 					return
 				case <-closed: // grpc stream was closed
+					// 如果gRPC Stream在事件通知发送过程中断开，则停止发送。
 					doneFunc()
 					log.Infof("Client closed connection %v", client.conID)
 				}

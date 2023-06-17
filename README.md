@@ -21,6 +21,11 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
             -   [Config控制器的任务处理流程](#config控制器的任务处理流程)
             -   [Service控制器的任务处理流程](#service控制器的任务处理流程)
             -   [资源更新事件处理：xDS分发](#资源更新事件处理xds分发)
+        -   [对xDS更新的预处理](#对xds更新的预处理)
+            -   [防抖动](#防抖动)
+            -   [XDSServer的缓存更新](#xdsserver的缓存更新)
+            -   [PushContext（推送上下文）的初始化](#pushcontext推送上下文的初始化)
+            -   [Pilot-push事件的发送及井发控制](#pilot-push事件的发送及井发控制)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -145,3 +150,26 @@ pilot/pkg/xds/eds.go:65,101
 ![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/xDS_distribute.png)
 
 XDSServer首先通过handleUpdates线程阻塞式地接收并处理更新请求，并将PushRequest发送到XDSServer的pushQueue中，然后由sendPushes线程并发地将PushRequest发送给每一条连接的pushChannel，最后由XDSServer的流处理接口处理分发请求。
+
+### 对xDS更新的预处理
+#### 防抖动
+pilot/pkg/xds/discovery.go:355,363
+
+#### XDSServer的缓存更新
+数量最大的缓存是EndpointShardsByService（全量的IstioEndpoint集合），也是在Service、Endpoint更新时，ServiceController主要维护的缓存。EnvoyXdsServer根据EndpointShardsByService可以快速构建本轮需要下发的EDS配置。
+
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/EndpointShardsByService_upgrade.png)
+
+EndpointShardsByService的更新主要在以下两种情况下发生:
+
+①在Endpoint的事件处理函数中;
+
+②在Service的事件处理函数中，主要针对Selector有变化或者Service的缓存同步晚于Endpoint的场景。
+
+#### PushContext（推送上下文）的初始化
+pilot/pkg/model/push_context.go:198,1179
+
+#### Pilot-push事件的发送及井发控制
+pilot/pkg/xds/discovery.go:482
+
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/pilot_push_events_and_concurrency_control.png)

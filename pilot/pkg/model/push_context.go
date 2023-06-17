@@ -202,43 +202,55 @@ type PushContext struct {
 	ProxyStatus map[string]map[string]ProxyPushStatus
 
 	// Synthesized from env.Mesh
+	// 默认的Service、VirtualService、DestinationRule规则的作用范围
 	exportToDefaults exportToDefaults
 
 	// ServiceIndex is the index of services by various fields.
+	// Service缓存，包含公共的可见服务、Namespace私有服务等
 	ServiceIndex serviceIndex
 
 	// serviceAccounts contains a map of hostname and port to service accounts.
+	// 服务账户缓存
 	serviceAccounts map[serviceAccountKey][]string
 
 	// virtualServiceIndex is the index of virtual services by various fields.
+	// VirtualService 缓存
 	virtualServiceIndex virtualServiceIndex
 
 	// destinationRuleIndex is the index of destination rules by various fields.
+	// DestinatonRule 缓存
 	destinationRuleIndex destinationRuleIndex
 
 	// gatewayIndex is the index of gateways.
+	// Gateway 缓存
 	gatewayIndex gatewayIndex
 
 	// clusterLocalHosts extracted from the MeshConfig
+	// 集群的私有服务
 	clusterLocalHosts ClusterLocalHosts
 
 	// sidecarIndex stores sidecar resources
+	// Sidecar缓存
 	sidecarIndex sidecarIndex
 
 	// envoy filters for each namespace including global config namespace
+	// EnvoyFiltler 缓存
 	envoyFiltersByNamespace map[string][]*EnvoyFilterWrapper
 
 	// wasm plugins for each namespace including global config namespace
 	wasmPluginsByNamespace map[string][]*WasmPluginWrapper
 
 	// AuthnPolicies contains Authn policies by namespace.
+	// 认证策略缓存
 	AuthnPolicies *AuthenticationPolicies `json:"-"`
 
 	// AuthzPolicies stores the existing authorization policies in the cluster. Could be nil if there
 	// are no authorization policies in the cluster.
+	// 授权策略缓存
 	AuthzPolicies *AuthorizationPolicies `json:"-"`
 
 	// Telemetry stores the existing Telemetry resources for the cluster.
+	// 遥测缓存
 	Telemetry *Telemetries `json:"-"`
 
 	// ProxyConfig stores the existing ProxyConfig resources for the cluster.
@@ -264,6 +276,7 @@ type PushContext struct {
 
 	// cache gateways addresses for each network
 	// this is mainly used for kubernetes multi-cluster scenario
+	// 东西向网关地址
 	networkMgr *NetworkManager
 
 	Networks *meshconfig.MeshNetworks
@@ -1162,9 +1175,11 @@ func (ps *PushContext) IsClusterLocal(service *Service) bool {
 // InitContext will initialize the data structures used for code generation.
 // This should be called before starting the push, from the thread creating
 // the push context.
+// PushContext相关属性的初始化通过IniContext方法实现，为了提升效率，分为增量更新和完全重建两种方式。
 func (ps *PushContext) InitContext(env *Environment, oldPushContext *PushContext, pushReq *PushRequest) error {
 	// Acquire a lock to ensure we don't concurrently initialize the same PushContext.
 	// If this does happen, one thread will block then exit early from InitDone=true
+	// 并发安全
 	ps.initializeMutex.Lock()
 	defer ps.initializeMutex.Unlock()
 	if ps.InitDone.Load() {
@@ -1177,14 +1192,21 @@ func (ps *PushContext) InitContext(env *Environment, oldPushContext *PushContext
 
 	// Must be initialized first as initServiceRegistry/VirtualServices/Destrules
 	// use the default export map.
+	// 初始化默认的ExportTo表
 	ps.initDefaultExportMaps()
 
 	// create new or incremental update
+	// 创建新的PushContext或者增量更新PushContext
+	// PushContext对象的缓存为后续xDS配置的生成提供了快捷的资源索引。
+	// PushContext是Pilot性能优化中很重要的一环，牺牲了一点内存，但成倍减少了读/写冲突，节省了CPU资源。
 	if pushReq == nil || oldPushContext == nil || !oldPushContext.InitDone.Load() || len(pushReq.ConfigsUpdated) == 0 {
+		// 创建新的PushContext相对简单，但缺点是消耗CPU资源。
 		if err := ps.createNewContext(env); err != nil {
 			return err
 		}
 	} else {
+		// 增量更新，理论上只是部分更新PushContext的缓存，CPU资源消耗少，速度更快。
+		//具体来讲，增量更新PushContext是根据每轮资源更新的类型，分析每一种资源变化所影响的缓存，定向更新某些缓存。
 		if err := ps.updateContext(env, oldPushContext, pushReq); err != nil {
 			return err
 		}
