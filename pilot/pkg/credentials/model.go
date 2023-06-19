@@ -19,10 +19,15 @@ import (
 )
 
 type Controller interface {
+	// 获取公钥和私钥
 	GetKeyCertAndStaple(name, namespace string) (key []byte, cert []byte, staple []byte, err error)
+	// 获取CA证书
 	GetCaCert(name, namespace string) (cert []byte, err error)
+	// 获取Docker镜像的下载证书
 	GetDockerCredential(name, namespace string) (cred []byte, err error)
+	// 签权
 	Authorize(serviceAccount, namespace string) error
+	// 注册事件处理函数
 	AddEventHandler(func(name, namespace string))
 }
 

@@ -289,15 +289,21 @@ func BuildSecret(scrtName, namespace string, certChain, privateKey, rootCert, ca
 }
 
 // IstioCA generates keys and certificates for Istio identities.
+// IstioCA为工作负载生成表示Istio身份的证书密钥对
 type IstioCA struct {
+	// 默认的证书有效期
 	defaultCertTTL time.Duration
-	maxCertTTL     time.Duration
-	caRSAKeySize   int
+	// 允许的最长证书有效期，用于限制Citadel可签发证书的最长有效期，当请求签发的证书TTL超过最长有效期时，IstioCA将会返回签发失败错误。
+	maxCertTTL   time.Duration
+	caRSAKeySize int
 
+	// CA机构使用的根证书
+	// 具有本地级存功能的抽象接口，缓存CA颁发证书所用的材料(公私钥对、根证书等)。
 	keyCertBundle *util.KeyCertBundle
 
 	// rootCertRotator periodically rotates self-signed root cert for CA. It is nil
 	// if CA is not self-signed CA.
+	// 根证书轮转器周期性地轮转自签根证书
 	rootCertRotator *SelfSignedCARootCertRotator
 }
 
@@ -333,6 +339,7 @@ func (ca *IstioCA) Run(stopChan chan struct{}) {
 }
 
 // Sign takes a PEM-encoded CSR and cert opts, and returns a signed certificate.
+// 根据CSR和其他一些有效期、SAN等签发证书
 func (ca *IstioCA) Sign(csrPEM []byte, certOpts CertOpts) (
 	[]byte, error,
 ) {
@@ -417,6 +424,7 @@ func (ca *IstioCA) sign(csrPEM []byte, subjectIDs []string, requestedLifetime ti
 		return nil, caerror.NewError(caerror.CANotReady, fmt.Errorf("Istio CA is not ready")) // nolint
 	}
 
+	// 解析CSR
 	csr, err := util.ParsePemEncodedCSR(csrPEM)
 	if err != nil {
 		return nil, caerror.NewError(caerror.CSRError, err)
@@ -428,15 +436,18 @@ func (ca *IstioCA) sign(csrPEM []byte, subjectIDs []string, requestedLifetime ti
 
 	lifetime := requestedLifetime
 	// If the requested requestedLifetime is non-positive, apply the default TTL.
+	// 如果requestedLifetime无效，则使用默认的证书有效期
 	if requestedLifetime.Seconds() <= 0 {
 		lifetime = ca.defaultCertTTL
 	}
 	// If checkLifetime is set and the requested TTL is greater than maxCertTTL, return an error
+	// 检查证书的有效期是否合法
 	if checkLifetime && requestedLifetime.Seconds() > ca.maxCertTTL.Seconds() {
 		return nil, caerror.NewError(caerror.TTLError, fmt.Errorf(
 			"requested TTL %s is greater than the max allowed TTL %s", requestedLifetime, ca.maxCertTTL))
 	}
 
+	// 底层调用Golang x509包来创建新的x509证书
 	certBytes, err := util.GenCertFromCSR(csr, signingCert, csr.PublicKey, *signingKey, subjectIDs, lifetime, forCA)
 	if err != nil {
 		return nil, caerror.NewError(caerror.CertGenError, err)

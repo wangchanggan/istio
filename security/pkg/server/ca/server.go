@@ -37,12 +37,16 @@ import (
 var serverCaLog = log.RegisterScope("serverca", "Citadel server log", 0)
 
 // CertificateAuthority contains methods to be supported by a CA.
+// CertificateAuthority是IstloCA必须实现的接口，用于工作负载证书签发
 type CertificateAuthority interface {
 	// Sign generates a certificate for a workload or CA, from the given CSR and cert opts.
+	// 根据CSR及TTL为工作负收签发证书
 	Sign(csrPEM []byte, opts ca.CertOpts) ([]byte, error)
 	// SignWithCertChain is similar to Sign but returns the leaf cert and the entire cert chain.
+	// 与sign方法的功能类似，但是返回工作负载证书及全部的证书链
 	SignWithCertChain(csrPEM []byte, opts ca.CertOpts) ([]string, error)
 	// GetCAKeyCertBundle returns the KeyCertBundle used by CA.
+	// 返回CA使用的KeyCertBundle
 	GetCAKeyCertBundle() *util.KeyCertBundle
 }
 
@@ -78,6 +82,7 @@ func (s *Server) CreateCertificate(ctx context.Context, request *pb.IstioCertifi
 ) {
 	s.monitoring.CSR.Increment()
 	am := security.AuthenticationManager{Authenticators: s.Authenticators}
+	// 认证客户端，获取客户端的身份，用于签发证书。
 	caller := am.Authenticate(ctx)
 	if caller == nil {
 		s.monitoring.AuthnError.Increment()
@@ -118,7 +123,11 @@ func (s *Server) CreateCertificate(ctx context.Context, request *pb.IstioCertifi
 	var signErr error
 	var cert []byte
 	var respCertChain []string
+	// 根据CSR，通过CA或者RA签发工作负载证书
 	if certSigner == "" {
+		// 调用CertificateAuthority接口的Sign方法，为工作负载签发新的证书。
+		// 当前CertificateAuthority接口的实现对象是IstioCA和KubermnetesRA
+		//因此CA服务器在运行时会动态选择是使用IstioCA自签证书还是使用Kubernetes签发证书。
 		cert, signErr = s.ca.Sign([]byte(request.Csr), certOpts)
 	} else {
 		respCertChain, signErr = s.ca.SignWithCertChain([]byte(request.Csr), certOpts)
@@ -130,6 +139,7 @@ func (s *Server) CreateCertificate(ctx context.Context, request *pb.IstioCertifi
 	}
 	if certSigner == "" {
 		respCertChain = []string{string(cert)}
+		// 添加根证书，构造证书链
 		if len(certChainBytes) != 0 {
 			respCertChain = append(respCertChain, string(certChainBytes))
 		}

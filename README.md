@@ -27,6 +27,16 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
             -   [PushContext（推送上下文）的初始化](#pushcontext推送上下文的初始化)
             -   [Pilot-push事件的发送及井发控制](#pilot-push事件的发送及井发控制)
         -   [xDS配置的生成及分发](#xds配置的生成及分发)
+    -   [Citadel](#citadel)
+        -   [启动流程](#启动流程-1)
+            -   [Istio-CA的创建](#istio-ca的创建)
+            -   [SDS服务器的初始化](#sds服务器的初始化)
+            -   [Istio-CA的启动](#istio-ca的启动)
+        -   [CA服务器的核心原理](#ca服务器的核心原理)
+        -   [证书签发实体IstloCA](#证书签发实体istloca)
+        -   [CredentialsController](#credentialscontroller)
+            -   [创建](#创建)
+            -   [核心原理](#核心原理)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -66,7 +76,7 @@ pilot/pkg/bootstrap/configcontroller.go:211
 ![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/CRD_operator_process.png)
 pilot/pkg/config/kube/crdclient/cache_handler.go:86,40,77
 
-pilot/pkg/bootstrap/server.go:907
+pilot/pkg/bootstrap/server.go:915
 
 完整的Config事件处理流程:
 
@@ -113,7 +123,7 @@ ServiceController为4种资源分别创建了Kubernetes Informer，用于监听K
 
 ![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/serviceController_event_handling.png)
 
-pilot/pkg/bootstrap/server.go:888
+pilot/pkg/bootstrap/server.go:896
 
 pilot/pkg/serviceregistry/kube/controller/endpointcontroller.go:58
 
@@ -130,14 +140,14 @@ Pilot通过XDSServer处理客户端的订阅请求，并完成xDS配置的生成
 #### Config控制器的任务处理流程
 pilot/pkg/config/kube/crdclient/client.go:195
 
-pilot/pkg/bootstrap/server.go:907
+pilot/pkg/bootstrap/server.go:915
 
 pilot/pkg/xds/discovery.go:338
 
 #### Service控制器的任务处理流程
 pilot/pkg/serviceregistry/kube/controller/controller.go:1257
 
-pilot/pkg/bootstrap/server.go:888
+pilot/pkg/bootstrap/server.go:896
 
 pilot/pkg/serviceregistry/kube/controller/controller.go:460
 
@@ -183,3 +193,51 @@ pilot/pkg/xds/xdsgen.go:97
 Pilot主要负责6种xDS配置资源CDS、EDS、LDS、RDS、ECDS、NDS的生成及下发。以CDS生成器为例，XDSServer根据代理的属性及PushContext缓存生成原始的Cluster配置。
 
 pilot/pkg/networking/core/v1alpha3/cluster.go:151
+
+## Citadel
+Citadel作为Istio安全的核心组件，主要用于为工作负载签发证书及处理网关的SDS请求，还能为Istiod服务器签发证书。
+
+### 启动流程
+pilot/pkg/bootstrap/server.go:230,1173
+
+其中的关键代码包含3部分：Istio CA的创建;SDS服务器的初始化;Istio CA的启动。
+
+#### Istio-CA的创建
+pilot/pkg/bootstrap/server.go:1206
+
+#### SDS服务器的初始化
+pilot/pkg/bootstrap/server.go:525
+
+#### Istio-CA的启动
+pilot/pkg/bootstrap/server.go:1257
+
+pilot/pkg/bootstrap/istio_ca.go:148
+
+### CA服务器的核心原理
+CA服务器在本质上是一个gRPC服务器，对外提供CreateCertificate接口，用于处理CSR请求，Istio所有工作负载证书的签发归根结底都会通过CreateCertificate接口进行。CA服务器默认基于TLS证书接收安全的gRPC连接。
+
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/citadel/caServer_process.png)
+
+security/pkg/server/ca/server.go:76
+
+### 证书签发实体IstloCA
+security/pkg/pki/ca/ca.go:293
+
+security/pkg/server/ca/server.go:41
+
+security/pkg/pki/ca/ca.go:343,421
+
+security/pkg/pki/ra/k8s_ra.go:93,64
+
+security/pkg/k8s/chiron/utils.go:113
+
+### CredentialsController
+pilot/pkg/credentials/model.go:21
+
+#### 创建
+pilot/pkg/credentials/kube/secrets.go:78
+
+#### 核心原理
+pilot/pkg/credentials/kube/secrets.go:285
+
+pilot/pkg/bootstrap/server.go:536

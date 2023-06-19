@@ -72,6 +72,9 @@ type authorizationResponse struct {
 
 var _ credentials.Controller = &CredentialsController{}
 
+// CredentialsController的主要职责是监听Kubernetes Secret
+// 然后为SDS生成器服务，为网关提供SDS配置，还可以为ECDS Generator提供Wasm镜像的下载证书。
+// 在单控制面多集群模型中，Citadel为每个集群都创建了一个SecretsCotollr，负责当前集群自身证名的获取。
 func NewCredentialsController(kc kube.Client) *CredentialsController {
 	// We only care about TLS certificates and docker config for Wasm image pulling.
 	// Unfortunately, it is not as simple as selecting type=kubernetes.io/tls and type=kubernetes.io/dockerconfigjson.
@@ -278,8 +281,10 @@ func extractRoot(scrt *v1.Secret) (cert []byte, err error) {
 		GenericScrtCaCert, TLSSecretCaCert, found)
 }
 
+// Secret资源对象的ResourceEventHandler事件回调函数由AddEventHandler注册
 func (s *CredentialsController) AddEventHandler(h func(name string, namespace string)) {
 	// register handler before informer starts
+	// 在Informer启动前注册回调处理函数
 	s.secrets.AddEventHandler(controllers.ObjectHandler(func(o controllers.Object) {
 		h(o.GetName(), o.GetNamespace())
 	}))

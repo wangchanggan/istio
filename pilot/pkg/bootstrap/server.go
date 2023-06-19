@@ -226,6 +226,7 @@ func (w *webhookInfo) addHandler(fn func()) {
 }
 
 // NewServer creates a new Server instance based on the provided arguments.
+// Istiod的初始化及启动入口
 func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	e := model.NewEnvironment()
 	e.DomainSuffix = args.RegistryOptions.KubeOptions.DomainSuffix
@@ -305,6 +306,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 		caOpts.ExternalCASigner = k8sSigner
 	}
 	// CA signing certificate must be created first if needed.
+	// 创建及初始化CA
 	if err := s.maybeCreateCA(caOpts); err != nil {
 		return nil, err
 	}
@@ -387,6 +389,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	caOpts.Authenticators = authenticators
 
 	// Start CA or RA server. This should be called after CA and Istiod certs have been created.
+	// 启动Istio CA
 	s.startCA(caOpts)
 
 	// TODO: don't run this if galley is started, one ctlz is enough
@@ -518,6 +521,7 @@ func (s *Server) WaitUntilCompletion() {
 }
 
 // initSDSServer starts the SDS server
+// SDS服务器主要根据用户配置的证书为工作负载生成SDS配置。
 func (s *Server) initSDSServer() {
 	if s.kubeClient == nil {
 		return
@@ -526,8 +530,11 @@ func (s *Server) initSDSServer() {
 		// Make sure we have security
 		log.Warnf("skipping Kubernetes credential reader; PILOT_ENABLE_XDS_IDENTITY_CHECK must be set to true for this feature.")
 	} else {
+		// 初始化多集群的Secret控制器
 		creds := kubecredentials.NewMulticluster(s.clusterID)
+		// 注册Secret事件回调处理函数，当Secret更新时触发xDS的推送
 		creds.AddSecretHandler(func(name string, namespace string) {
+			// 通过Secret控制器List-Watch（监听）Secret资源的变化，进而触发xDS配置的生成与下发
 			s.XDSServer.ConfigUpdate(&model.PushRequest{
 				Full:           false,
 				ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.Secret, Name: name, Namespace: namespace}),
@@ -535,6 +542,7 @@ func (s *Server) initSDSServer() {
 				Reason: []model.TriggerReason{model.SecretTrigger},
 			})
 		})
+		// 为多集群发现控制器注册Secret事件回调处理函数
 		s.multiclusterController.AddHandler(creds)
 		s.environment.CredentialsController = creds
 	}
@@ -1166,6 +1174,7 @@ func (s *Server) initControllers(args *PilotArgs) error {
 	log.Info("initializing controllers")
 	s.initMulticluster(args)
 
+	// 初始化SDS服务器，其目前主要用于处理网关的SDS请求
 	s.initSDSServer()
 
 	if features.EnableEnhancedResourceScoping {
@@ -1193,11 +1202,14 @@ func (s *Server) initMulticluster(args *PilotArgs) {
 }
 
 // maybeCreateCA creates and initializes CA Key if needed.
+// 创建用于自签证书的 IstioCA或者RA（使用外部CA签发证书）;
 func (s *Server) maybeCreateCA(caOpts *caOptions) error {
 	// CA signing certificate must be created only if CA is enabled.
+	// 仅在CA特性开关打开的情况下初始化CA
 	if features.EnableCAServer {
 		log.Info("creating CA and initializing public key")
 		var err error
+		// 从Kubernetes集群的"cacerts"Secret处获取根证书并将其保存在本地目录下
 		if useRemoteCerts.Get() {
 			if err = s.loadCACerts(caOpts, LocalCertDir.Get()); err != nil {
 				return fmt.Errorf("failed to load remote CA certs: %v", err)
@@ -1205,11 +1217,13 @@ func (s *Server) maybeCreateCA(caOpts *caOptions) error {
 		}
 		// May return nil, if the CA is missing required configs - This is not an error.
 		if caOpts.ExternalCAType != "" {
+			// 创建RA
 			if s.RA, err = s.createIstioRA(caOpts); err != nil {
 				return fmt.Errorf("failed to create RA: %v", err)
 			}
 		}
 		if !s.isCADisabled() {
+			// 创建IstioCA实例，IstioCA可以通过根证书轮转器自动进行根证书的轮转。
 			if s.CA, err = s.createIstioCA(caOpts); err != nil {
 				return fmt.Errorf("failed to create CA: %v", err)
 			}
@@ -1239,6 +1253,7 @@ func (s *Server) shouldStartNsController() bool {
 }
 
 // StartCA starts the CA or RA server if configured.
+// startCA启动CA或RA服务器
 func (s *Server) startCA(caOpts *caOptions) {
 	if s.CA == nil && s.RA == nil {
 		return
@@ -1249,11 +1264,14 @@ func (s *Server) startCA(caOpts *caOptions) {
 			grpcServer = s.grpcServer
 		}
 		// Start the RA server if configured, else start the CA server
+		// 通过RunCA将CA服务器的接口注册到gRPC服务器上，这样就能与xDS的Pilot复用同一个gRPC服务器了
 		if s.RA != nil {
 			log.Infof("Starting RA")
+			// 注册RA到gRPC服务器
 			s.RunCA(grpcServer, s.RA, caOpts)
 		} else if s.CA != nil {
 			log.Infof("Starting IstioD CA")
+			// 注册CA到gRPC服务器
 			s.RunCA(grpcServer, s.CA, caOpts)
 		}
 		return nil

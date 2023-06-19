@@ -105,6 +105,11 @@ func GenKeyCertK8sCA(client clientset.Interface, dnsName,
 // 2. Approve a CSR
 // 3. Read the signed certificate
 // 4. Clean up the artifacts (e.g., delete CSR)
+// SignCSRK8s通过创建Kubernetes CSR签发证书
+// 1.创建一个CSR
+// 2.批准上一步创建的CSR
+// 3.读取签署的证书
+// 4.删除CSR
 func SignCSRK8s(client clientset.Interface, csrData []byte, signerName string, usages []certv1.KeyUsage,
 	dnsName, caFilePath string, approveCsr, appendCaCert bool, requestedLifetime time.Duration,
 ) ([]byte, []byte, error) {
@@ -112,7 +117,7 @@ func SignCSRK8s(client clientset.Interface, csrData []byte, signerName string, u
 	v1Req := false
 
 	// 1. Submit the CSR
-
+	// 1.创建一个CSR
 	csrName, v1CsrReq, v1Beta1CsrReq, err := submitCSR(client, csrData, signerName, usages, csrRetriesMax, requestedLifetime)
 	if err != nil {
 		return nil, nil, fmt.Errorf("unable to submit CSR request (%v). Error: %v", csrName, err)
@@ -123,11 +128,13 @@ func SignCSRK8s(client clientset.Interface, csrData []byte, signerName string, u
 	}
 
 	// clean up certificate request after deletion
+	// 4.删除CSR
 	defer func() {
 		_ = cleanUpCertGen(client, v1Req, csrName)
 	}()
 
 	// 2. Approve the CSR
+	// 2.批准上一步创建的CSR
 	if approveCsr {
 		csrMsg := fmt.Sprintf("CSR (%s) for the certificate (%s) is approved", csrName, dnsName)
 		err = approveCSR(csrName, csrMsg, client, v1CsrReq, v1Beta1CsrReq)
@@ -138,6 +145,7 @@ func SignCSRK8s(client clientset.Interface, csrData []byte, signerName string, u
 	}
 
 	// 3. Read the signed certificate
+	// 3.读取签署的证书
 	certChain, caCert, err := readSignedCertificate(client,
 		csrName, certWatchTimeout, certReadInterval, maxNumCertRead, caFilePath, appendCaCert, v1Req)
 	if err != nil {

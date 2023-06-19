@@ -87,6 +87,9 @@ func (r *KubernetesRA) kubernetesSign(csrPEM []byte, caCertFile string, certSign
 }
 
 // Sign takes a PEM-encoded CSR and cert opts, and returns a certificate signed by k8s CA.
+// Istio RA是Istio借助Kubernetes为工作负载签发证书的机构，同样实现了CertificateAuthority接口
+// 与CA模式的区别是，它只是将CSR请求转发给Kubernetes API服务器，然后等待证书签发完成即可。
+// sign方法根据CSR和其他属性，通过Kubernetes来签发证书
 func (r *KubernetesRA) Sign(csrPEM []byte, certOpts ca.CertOpts) ([]byte, error) {
 	_, err := preSign(r.raOpts, csrPEM, certOpts.SubjectIDs, certOpts.TTL, certOpts.ForCA)
 	if err != nil {

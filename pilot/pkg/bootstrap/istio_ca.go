@@ -167,6 +167,7 @@ func (s *Server) RunCA(grpc *grpc.Server, ca caserver.CertificateAuthority, opts
 	// The CA API uses cert with the max workload cert TTL.
 	// 'hostlist' must be non-empty - but is not used since a grpc server is passed.
 	// Adds client cert auth and kube (sds enabled)
+	// 创建CA服务器
 	caServer, startErr := caserver.New(ca, maxWorkloadCertTTL.Get(), opts.Authenticators, s.kubeClient, opts.DiscoveryFilter)
 	if startErr != nil {
 		log.Fatalf("failed to create istio ca server: %v", startErr)
@@ -189,6 +190,7 @@ func (s *Server) RunCA(grpc *grpc.Server, ca caserver.CertificateAuthority, opts
 		}
 	}
 
+	// 将caServer接口注册到gRPC服务器，之后便可以为工作负载签发证书了
 	caServer.Register(grpc)
 
 	log.Info("Istiod CA has started")
