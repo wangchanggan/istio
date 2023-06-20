@@ -42,6 +42,7 @@ func (*httpServerErrorLogWriter) Write(p []byte) (int, error) {
 // initSSecureWebhookServer handles initialization for the HTTPS webhook server.
 // If https address is off the injection handlers will be registered on the main http endpoint, with
 // TLS handled by a proxy/gateway in front of Istiod.
+// 初始化HTTPS服务器
 func (s *Server) initSecureWebhookServer(args *PilotArgs) {
 	// create the https server for hosting the k8s injectionWebhook handlers.
 	if args.ServerOptions.HTTPSAddr == "" {
@@ -52,13 +53,15 @@ func (s *Server) initSecureWebhookServer(args *PilotArgs) {
 
 	istiolog.Info("initializing secure webhook server for istiod webhooks")
 	// create the https server for hosting the k8s injectionWebhook handlers.
+	// 创建HTTP请求多路复用器
 	s.httpsMux = http.NewServeMux()
+	// 创建webhook服务器
 	s.httpsServer = &http.Server{
 		Addr:     args.ServerOptions.HTTPSAddr,
 		ErrorLog: log.New(&httpServerErrorLogWriter{}, "", 0),
 		Handler:  s.httpsMux,
 		TLSConfig: &tls.Config{
-			GetCertificate: s.getIstiodCertificate,
+			GetCertificate: s.getIstiodCertificate, // 自动轮转证书
 			MinVersion:     tls.VersionTLS12,
 			CipherSuites:   args.ServerOptions.TLSOptions.CipherSuits,
 		},

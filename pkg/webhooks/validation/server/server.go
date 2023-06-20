@@ -112,6 +112,8 @@ func New(o Options) (*Webhook, error) {
 		domainSuffix: o.DomainSuffix,
 	}
 
+	// 初始化配置校验
+	// Webhook Server在初始化时会注册API配置校验handler(serveValidate)
 	o.Mux.HandleFunc("/validate", wh.serveValidate)
 	o.Mux.HandleFunc("/validate/", wh.serveValidate)
 
@@ -127,6 +129,8 @@ type admitFunc func(*kube.AdmissionRequest) *kube.AdmissionResponse
 func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	var body []byte
 	if r.Body != nil {
+		// 读取请求体，为了内存安全，并没有直接使用ioutil.ReadAll
+		// 而是通过io.LimitedReader限制读取数据的大小
 		if data, err := kube.HTTPConfigReader(r); err == nil {
 			body = data
 		} else {
@@ -151,13 +155,16 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	var reviewResponse *kube.AdmissionResponse
 	var obj runtime.Object
 	var ar *kube.AdmissionReview
+	// 解码请求数据
 	if out, _, err := deserializer.Decode(body, nil, obj); err != nil {
 		reviewResponse = toAdmissionResponse(fmt.Errorf("could not decode body: %v", err))
 	} else {
+		// 实现了一个Admission请求版本的转换器，支持v1beta1和v1两种版本的Admission API
 		ar, err = kube.AdmissionReviewKubeToAdapter(out)
 		if err != nil {
 			reviewResponse = toAdmissionResponse(fmt.Errorf("could not decode object: %v", err))
 		} else {
+			// 校验请求
 			reviewResponse = admit(ar.Request)
 		}
 	}
@@ -175,6 +182,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 			}
 		}
 	}
+	// 实现了一个Admission响应版本的转换器，支持v1beta1和v1两种版本的Admission API
 	responseKube = kube.AdmissionReviewAdapterToKube(&response, apiVersion)
 	resp, err := json.Marshal(responseKube)
 	if err != nil {
@@ -188,6 +196,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	}
 }
 
+// // WebhookServer在启动后开始接收来自客户端的请求并对配置进行校验，最后返回校验结果，它主要通过seveValidate调用serve方法来实现对Istio API配置的校验。
 func (wh *Webhook) serveValidate(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, wh.validate)
 }
@@ -202,6 +211,7 @@ func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionRespo
 		return err
 	}
 	switch request.Operation {
+	// 检查请求类型，只处理Create、Update两种类型的请求
 	case kube.Create, kube.Update:
 	default:
 		scope.Warnf("Unsupported webhook operation %v", addDryRunMessageIfNeeded(request.Operation))
@@ -209,6 +219,9 @@ func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionRespo
 		return &kube.AdmissionResponse{Allowed: true}
 	}
 
+	// 将数据进行格式转换、校验。
+	// 在Istio Schema中保存了Istio所有的API配置信息及校验方法。
+	// 通过数据对象的类型即可在Schema中找到相应的校验方法，对数据进行校验
 	var obj crd.IstioKind
 	if err := json.Unmarshal(request.Object.Raw, &obj); err != nil {
 		scope.Infof("cannot decode configuration: %v", addDryRunMessageIfNeeded(err.Error()))
@@ -225,6 +238,7 @@ func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionRespo
 		return toAdmissionResponse(fmt.Errorf("unrecognized type %v", obj.GroupVersionKind()))
 	}
 
+	// 将Kubernetes对象转换成Istio API对象
 	out, err := crd.ConvertObject(s, &obj, wh.domainSuffix)
 	if err != nil {
 		scope.Infof("error decoding configuration: %v", addDryRunMessageIfNeeded(err.Error()))
@@ -232,6 +246,8 @@ func (wh *Webhook) validate(request *kube.AdmissionRequest) *kube.AdmissionRespo
 		return toAdmissionResponse(fmt.Errorf("error decoding configuration: %v", err))
 	}
 
+	// 校验Istio API对象
+	// 每种API对象的ValidateConfig都在pkg/config/schema/collections/collections.gen.go中注册，而且各不相同。
 	warnings, err := s.ValidateConfig(*out)
 	if err != nil {
 		scope.Infof("configuration is invalid: %v", addDryRunMessageIfNeeded(err.Error()))

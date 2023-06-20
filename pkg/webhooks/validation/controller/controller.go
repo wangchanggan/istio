@@ -107,6 +107,8 @@ func NewValidatingWebhookController(client kube.Client,
 	return newController(o, client)
 }
 
+// ValidatingWebhookConfiguration控制器的主要职责是动态更新ValidatingWebhookConfiguration
+// 其原理是根据ValidatingWebhookConfiguration及CaBundle的变化进行ValidatingWebhookConfiguration对象的重新调协(Reconcile)
 func newController(o Options, client kube.Client) *Controller {
 	c := &Controller{
 		o:      o,
@@ -124,9 +126,11 @@ func newController(o Options, client kube.Client) *Controller {
 		// before we are ready; using FastSlow means we tend to always take the Slow time (1min).
 		controllers.WithRateLimiter(workqueue.NewItemExponentialFailureRateLimiter(100*time.Millisecond, 1*time.Minute)))
 
+	//初始化Informer，监听ValidatingWebhookConfiguration对象
 	c.webhooks = kclient.NewFiltered[*kubeApiAdmission.ValidatingWebhookConfiguration](client, kclient.Filter{
 		LabelSelector: fmt.Sprintf("%s=%s", label.IoIstioRev.Name, o.Revision),
 	})
+	// 注册事件处理方法
 	c.webhooks.AddEventHandler(controllers.ObjectHandler(c.queue.AddObject))
 
 	return c
@@ -138,6 +142,7 @@ func (c *Controller) Reconcile(key types.NamespacedName) error {
 	scope := scope.WithLabels("webhook", name)
 	// Stop early if webhook is not present, rather than attempting (and failing) to reconcile permanently
 	// If the webhook is later added a new reconciliation request will trigger it to update
+	// 检查在集群中是否存在ValidatingWebhookConfiguration
 	if whc == nil {
 		scope.Infof("Skip patching webhook, not found")
 		return nil
@@ -146,6 +151,7 @@ func (c *Controller) Reconcile(key types.NamespacedName) error {
 	scope.Debugf("Reconcile(enter)")
 	defer func() { scope.Debugf("Reconcile(exit)") }()
 
+	// 获取CaBundle
 	caBundle, err := util.LoadCABundle(c.o.CABundleWatcher)
 	if err != nil {
 		scope.Errorf("Failed to load CA bundle: %v", err)
@@ -153,11 +159,15 @@ func (c *Controller) Reconcile(key types.NamespacedName) error {
 		// no point in retrying unless cert file changes.
 		return nil
 	}
+	// 设置失败策略
 	failurePolicy := kubeApiAdmission.Ignore
 	ready := c.readyForFailClose()
 	if ready {
 		failurePolicy = kubeApiAdmission.Fail
 	}
+	// 调用更新配置方法
+	// 更新通知主要由ValidatingWebhookConfiguration的更新和Istiod证书的变化触发
+	// 在任一事件发生时，其事件处理方法都会将更新通知发送到队列中，然后由控制器调协。
 	if err := c.updateValidatingWebhookConfiguration(whc, caBundle, failurePolicy); err != nil {
 		return fmt.Errorf("fail to update webhook: %v", err)
 	}
@@ -169,12 +179,14 @@ func (c *Controller) Reconcile(key types.NamespacedName) error {
 
 func (c *Controller) Run(stop <-chan struct{}) {
 	kube.WaitForCacheSync(stop, c.webhooks.HasSynced)
+	// CaBundle监听器的启动和
 	go c.startCaBundleWatcher(stop)
 	c.queue.Run(stop)
 }
 
 // startCaBundleWatcher listens for updates to the CA bundle and patches the webhooks.
 // shouldn't we be doing this for both validating and mutating webhooks...?
+// CaBundle的变化同样会触发ValidatingWebookConfiguration调协
 func (c *Controller) startCaBundleWatcher(stop <-chan struct{}) {
 	if c.o.CABundleWatcher == nil {
 		return

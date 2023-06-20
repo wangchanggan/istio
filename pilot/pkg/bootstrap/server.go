@@ -340,7 +340,9 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 
 	// common https server for webhooks (e.g. injection, validation)
 	if s.kubeClient != nil {
+		// 初始化webhook服务器
 		s.initSecureWebhookServer(args)
+		// 初始化Sidecar Injector准入控制器
 		wh, err := s.initSidecarInjector(args)
 		if err != nil {
 			return nil, fmt.Errorf("error initializing sidecar injector: %v", err)
@@ -348,6 +350,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 		s.webhookInfo.mu.Lock()
 		s.webhookInfo.wh = wh
 		s.webhookInfo.mu.Unlock()
+		// 初始化Galley API校验控制器
 		if err := s.initConfigValidation(args); err != nil {
 			return nil, fmt.Errorf("error initializing config validator: %v", err)
 		}

@@ -37,6 +37,12 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
         -   [CredentialsController](#credentialscontroller)
             -   [创建](#创建)
             -   [核心原理](#核心原理)
+    -   [Galley](#galley)
+        -   [启动流程](#启动流程-2)
+            -   [Galley-WebhookServer的初始化](#galley-webhookserver的初始化)
+            -   [ValidatingWebhookConfiguration控制器的初始化](#validatingwebhookconfiguration控制器的初始化)
+        -   [配置校验](#配置校验)
+        -   [Validating控制器的实现](#validating控制器的实现)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -76,7 +82,7 @@ pilot/pkg/bootstrap/configcontroller.go:211
 ![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/CRD_operator_process.png)
 pilot/pkg/config/kube/crdclient/cache_handler.go:86,40,77
 
-pilot/pkg/bootstrap/server.go:915
+pilot/pkg/bootstrap/server.go:918
 
 完整的Config事件处理流程:
 
@@ -123,7 +129,7 @@ ServiceController为4种资源分别创建了Kubernetes Informer，用于监听K
 
 ![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/serviceController_event_handling.png)
 
-pilot/pkg/bootstrap/server.go:896
+pilot/pkg/bootstrap/server.go:899
 
 pilot/pkg/serviceregistry/kube/controller/endpointcontroller.go:58
 
@@ -140,14 +146,14 @@ Pilot通过XDSServer处理客户端的订阅请求，并完成xDS配置的生成
 #### Config控制器的任务处理流程
 pilot/pkg/config/kube/crdclient/client.go:195
 
-pilot/pkg/bootstrap/server.go:915
+pilot/pkg/bootstrap/server.go:918
 
 pilot/pkg/xds/discovery.go:338
 
 #### Service控制器的任务处理流程
 pilot/pkg/serviceregistry/kube/controller/controller.go:1257
 
-pilot/pkg/bootstrap/server.go:896
+pilot/pkg/bootstrap/server.go:899
 
 pilot/pkg/serviceregistry/kube/controller/controller.go:460
 
@@ -198,18 +204,18 @@ pilot/pkg/networking/core/v1alpha3/cluster.go:151
 Citadel作为Istio安全的核心组件，主要用于为工作负载签发证书及处理网关的SDS请求，还能为Istiod服务器签发证书。
 
 ### 启动流程
-pilot/pkg/bootstrap/server.go:230,1173
+pilot/pkg/bootstrap/server.go:230,1176
 
 其中的关键代码包含3部分：Istio CA的创建;SDS服务器的初始化;Istio CA的启动。
 
 #### Istio-CA的创建
-pilot/pkg/bootstrap/server.go:1206
+pilot/pkg/bootstrap/server.go:1209
 
 #### SDS服务器的初始化
-pilot/pkg/bootstrap/server.go:525
+pilot/pkg/bootstrap/server.go:528
 
 #### Istio-CA的启动
-pilot/pkg/bootstrap/server.go:1257
+pilot/pkg/bootstrap/server.go:1260
 
 pilot/pkg/bootstrap/istio_ca.go:148
 
@@ -240,4 +246,28 @@ pilot/pkg/credentials/kube/secrets.go:78
 #### 核心原理
 pilot/pkg/credentials/kube/secrets.go:285
 
-pilot/pkg/bootstrap/server.go:536
+pilot/pkg/bootstrap/server.go:539
+
+## Galley
+Galley作为Istio配置管理的核心组件，是一种典型的Kubernetes准入控制器，主要用于Istio API校验，也可用于维护自身的配置ValidatingWebhookConfiguration。
+
+### 启动流程
+pilot/pkg/bootstrap/server.go:342
+
+#### Galley-WebhookServer的初始化
+pilot/pkg/bootstrap/webhook.go:46
+
+pkg/webhooks/validation/server/server.go:117
+
+#### ValidatingWebhookConfiguration控制器的初始化
+pkg/webhooks/validation/controller/controller.go:98,112
+
+pkg/webhooks/validation/controller/controller.go:180
+
+### 配置校验
+pkg/webhooks/validation/server/server.go:200,129,204
+
+### Validating控制器的实现
+pkg/webhooks/validation/controller/controller.go:112,190,139
+
+pkg/kube/controllers/queue.go:110,147
