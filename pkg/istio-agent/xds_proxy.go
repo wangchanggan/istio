@@ -122,6 +122,7 @@ const (
 	localHostIPv6 = "::1"
 )
 
+// 创建异步xDS转发服务:
 func initXdsProxy(ia *Agent) (*XdsProxy, error) {
 	var err error
 	localHostAddr := localHostIPv4
@@ -191,6 +192,7 @@ func initXdsProxy(ia *Agent) (*XdsProxy, error) {
 	}
 
 	go func() {
+		// 阻塞启动xDS转发服务器
 		if err := proxy.downstreamGrpcServer.Serve(proxy.downstreamListener); err != nil {
 			log.Errorf("failed to accept downstream gRPC connection %v", err)
 		}
@@ -292,12 +294,15 @@ type adsStream interface {
 // Every time envoy makes a fresh connection to the agent, we reestablish a new connection to the upstream xds
 // This ensures that a new connection between istiod and agent doesn't end up consuming pending messages from envoy
 // as the new connection may not go to the same istiod. Vice versa case also applies.
+// 在收到xDS请求时，经过下层gRPC协议库的处理，最终由XdsProxy.StreamAggregatedResources方法响应
 func (p *XdsProxy) StreamAggregatedResources(downstream xds.DiscoveryStream) error {
 	proxyLog.Debugf("accepted XDS connection from Envoy, forwarding to upstream XDS server")
 	return p.handleStream(downstream)
 }
 
+// 处理从Envoy进程发送到Pilot-agent进程的xDS请求，xDS请求通过名字为/etc/istio/proxy/XDS的UDS长连接通道进行发送
 func (p *XdsProxy) handleStream(downstream adsStream) error {
+	// 代理连接通道，用于记录上下游连接的对应关系
 	con := &ProxyConnection{
 		conID:           connectionNumber.Inc(),
 		upstreamError:   make(chan error, 2), // can be produced by recv and send
@@ -320,11 +325,14 @@ func (p *XdsProxy) handleStream(downstream adsStream) error {
 		// the control plane requires substantial changes. Instead, we make the requests channel
 		// unbounded. This is the least likely to cause issues as the messages we store here are the
 		// smallest relative to other channels.
+		// 下游请求队列
 		requestsChan: channels.NewUnbounded[*discovery.DiscoveryRequest](),
 		// Allow a buffer of 1. This ensures we queue up at most 2 (one in process, 1 pending) responses before forwarding.
+		// 上游响应队列
 		responsesChan: make(chan *discovery.DiscoveryResponse, 1),
 		stopChan:      make(chan struct{}),
-		downstream:    downstream,
+		// 记录下游的gRPC连接
+		downstream: downstream,
 	}
 
 	p.registerStream(con)
@@ -333,6 +341,7 @@ func (p *XdsProxy) handleStream(downstream adsStream) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
+	// 创建上游的GRPC连接
 	upstreamConn, err := p.buildUpstreamConn(ctx)
 	if err != nil {
 		proxyLog.Errorf("failed to connect to upstream %s: %v", p.istiodAddress, err)
@@ -341,12 +350,14 @@ func (p *XdsProxy) handleStream(downstream adsStream) error {
 	}
 	defer upstreamConn.Close()
 
+	// 绑定上游的gRPC连接关联的xDS协议处理器
 	xds := discovery.NewAggregatedDiscoveryServiceClient(upstreamConn)
 	ctx = metadata.AppendToOutgoingContext(context.Background(), "ClusterID", p.clusterID)
 	for k, v := range p.xdsHeaders {
 		ctx = metadata.AppendToOutgoingContext(ctx, k, v)
 	}
 	// We must propagate upstream termination to Envoy. This ensures that we resume the full XDS sequence on new connection
+	// 处理上游发送和接收的消息
 	return p.handleUpstream(ctx, con, xds)
 }
 
@@ -357,8 +368,12 @@ func (p *XdsProxy) buildUpstreamConn(ctx context.Context) (*grpc.ClientConn, err
 	return grpc.DialContext(ctx, p.istiodAddress, opts...)
 }
 
+// 为了实现异步XdsProxy服务器，需要采用不同的线程同时处理下游xDS请求的接收、上游xDS请求的发送及上游响应的发送。
+// handleStream方法在与Envoy进程建立ADS长连接通道后，同时创建了代表上下游连接关联关系的ProxyConnection对象，并保存下游已接收的gRPC连接。
+// 在创建上游连接并绑定上游连接使用的gRPC协议处理器后，Pilot-agent进程执行handleUpstream启动下游及上游处理线程。
 func (p *XdsProxy) handleUpstream(ctx context.Context, con *ProxyConnection, xds discovery.AggregatedDiscoveryServiceClient) error {
 	upstream, err := xds.StreamAggregatedResources(ctx,
+		// 指定上游连接处理ADS消息类型
 		grpc.MaxCallRecvMsgSize(defaultClientMaxReceiveMessageSize))
 	if err != nil {
 		// Envoy logs errors again, so no need to log beyond debug level
@@ -370,12 +385,15 @@ func (p *XdsProxy) handleUpstream(ctx context.Context, con *ProxyConnection, xds
 	proxyLog.Infof("connected to upstream XDS server: %s", p.istiodAddress)
 	defer proxyLog.Debugf("disconnected from XDS server: %s", p.istiodAddress)
 
+	// 完成ProxyConnection上下游连接关联
 	con.upstream = upstream
 
 	// Handle upstream xds recv
+	// 创建go任务来循环接收来自控制面Istiod的xDS响应
 	go func() {
 		for {
 			// from istiod
+			// 接收从Istiod发送的响应
 			resp, err := con.upstream.Recv()
 			if err != nil {
 				select {
@@ -385,13 +403,16 @@ func (p *XdsProxy) handleUpstream(ctx context.Context, con *ProxyConnection, xds
 				return
 			}
 			select {
+			// 将响应消息发送到responsesChan管道中，这样可以异步地继续接收新的xDS响应来提升并发处理性能。
 			case con.responsesChan <- resp:
 			case <-con.stopChan:
 			}
 		}
 	}()
 
+	// 处理从Envoy接收的xDS请求
 	go p.handleUpstreamRequest(con)
+	// 将响应发送给Envoy进程
 	go p.handleUpstreamResponse(con)
 
 	for {
@@ -429,6 +450,7 @@ func (p *XdsProxy) handleUpstreamRequest(con *ProxyConnection) {
 	go func() {
 		for {
 			// recv xds requests from envoy
+			// 读取Envoy进程发送来的xDS请求
 			req, err := con.downstream.Recv()
 			if err != nil {
 				select {
@@ -439,6 +461,7 @@ func (p *XdsProxy) handleUpstreamRequest(con *ProxyConnection) {
 			}
 
 			// forward to istiod
+			// 将请求向上游发送，这里并不实际发送网络报文，而是将请求保存到本地消息队列con.requestsChan中，这样同样提升了下游请求接收性能
 			con.sendRequest(req)
 			if !initialRequestsSent.Load() && req.TypeUrl == v3.ListenerType {
 				// fire off an initial NDS request
@@ -469,6 +492,7 @@ func (p *XdsProxy) handleUpstreamRequest(con *ProxyConnection) {
 	defer con.upstream.CloseSend() // nolint
 	for {
 		select {
+		// 取出下游xDS请求
 		case req := <-con.requestsChan.Get():
 			con.requestsChan.Load()
 			if req.TypeUrl == v3.HealthInfoType && !initialRequestsSent.Load() {
@@ -483,6 +507,7 @@ func (p *XdsProxy) handleUpstreamRequest(con *ProxyConnection) {
 				}
 				p.ecdsLastNonce.Store(req.ResponseNonce)
 			}
+			// 发送到上游连接
 			if err := sendUpstream(con.upstream, req); err != nil {
 				err = fmt.Errorf("upstream [%d] send error for type url %s: %v", con.conID, req.TypeUrl, err)
 				con.upstreamError <- err
@@ -498,6 +523,7 @@ func (p *XdsProxy) handleUpstreamResponse(con *ProxyConnection) {
 	forwardEnvoyCh := make(chan *discovery.DiscoveryResponse, 1)
 	for {
 		select {
+		// 从响应通道取出xDS响应消息
 		case resp := <-con.responsesChan:
 			// TODO: separate upstream response handling from requests sending, which are both time costly
 			proxyLog.Debugf("response for type url %s", resp.TypeUrl)
@@ -543,8 +569,10 @@ func (p *XdsProxy) handleUpstreamResponse(con *ProxyConnection) {
 				}
 			default:
 				if strings.HasPrefix(resp.TypeUrl, v3.DebugType) {
+					// 在调试场景下将Istiod的响应转发给Tap系统
 					p.forwardToTap(resp)
 				} else {
+					// 将xDS响应发送到Envoy进程
 					forwardToEnvoy(con, resp)
 				}
 			}
@@ -590,6 +618,7 @@ func forwardToEnvoy(con *ProxyConnection, resp *discovery.DiscoveryResponse) {
 		proxyLog.Errorf("downstream [%d] dropped xds push to Envoy, connection already closed", con.conID)
 		return
 	}
+	// 使用已经建立关联的下游UDS通道，执行downstream.Send将xDS响应进行gRPC封装后发送到Envoy进程:
 	if err := sendDownstream(con.downstream, resp); err != nil {
 		select {
 		case con.downstreamError <- err:
@@ -624,6 +653,7 @@ func (p *XdsProxy) close() {
 }
 
 func (p *XdsProxy) initDownstreamServer() error {
+	// 创建UDS监听器
 	l, err := uds.NewListener(p.xdsUdsPath)
 	if err != nil {
 		return err
@@ -631,10 +661,15 @@ func (p *XdsProxy) initDownstreamServer() error {
 	// TODO: Expose keepalive options to agent cmd line flags.
 	opts := p.downstreamGrpcOptions
 	opts = append(opts, istiogrpc.ServerOptions(istiokeepalive.DefaultOption())...)
+	// 创建通用的gRPC服务器
 	grpcs := grpc.NewServer(opts...)
+	// 关联xdsProxy对象，作为ADS类型的xDS消息处理器
 	discovery.RegisterAggregatedDiscoveryServiceServer(grpcs, p)
+	// 注册gRPC反射服务
 	reflection.Register(grpcs)
+	// 保存gRPC服务器的引用
 	p.downstreamGrpcServer = grpcs
+	// 保存监听器的引用
 	p.downstreamListener = l
 	return nil
 }
@@ -686,6 +721,7 @@ func (p *XdsProxy) getTLSOptions(agent *Agent) (*istiogrpc.TLSOptions, error) {
 }
 
 // sendUpstream sends discovery request.
+// 使用gRPC协议将xDS请求封装后通过上游TCP连接发送到Istiod控制面。
 func sendUpstream(upstream xds.DiscoveryClient, request *discovery.DiscoveryRequest) error {
 	return istiogrpc.Send(upstream.Context(), func() error { return upstream.Send(request) })
 }

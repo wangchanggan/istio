@@ -45,6 +45,7 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
         -   [Validating控制器的实现](#validating控制器的实现)
     -   [Pilot-agent](#pilot-agent)
         -   [启动与监控](#启动与监控)
+        -   [xDS转发服务](#xds转发服务)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -68,7 +69,7 @@ pilot/pkg/model/config.go:212,153
 
 #### 初始化
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/configController_init.png)
+![img.png](docs/images/pilot/configController_init.png)
 
 pilot/pkg/bootstrap/configcontroller.go:61,135,346
 
@@ -76,12 +77,12 @@ pilot/pkg/config/kube/crdclient/client.go:61
 
 另外，虽然Istio没有适配器可直接对接其他注册中心，但Istio提供了可扩展的接口协议MCP，方便用户集成其他第三方注册中心。MCP ConfigController与Kubernetes ConfigController基本类似，均实现了ConfigStoreController接口，支持Istio配置资源的发现，并提供了缓存管理功能。在创建MCP ConfigController时需要通过MeshConfig.ConfigSources指定MCP服务器的地址。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/MCP_configController_init.png)
+![img.png](docs/images/pilot/MCP_configController_init.png)
 
 pilot/pkg/bootstrap/configcontroller.go:211
 
 #### 核心工作机制
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/CRD_operator_process.png)
+![img.png](docs/images/pilot/CRD_operator_process.png)
 pilot/pkg/config/kube/crdclient/cache_handler.go:86,40,77
 
 pilot/pkg/bootstrap/server.go:918
@@ -94,7 +95,7 @@ pilot/pkg/bootstrap/server.go:918
 
 （3）任务处理协程阻塞式地读取任务队列，执行任务，通过onEvent方法处理事件，并通过configHandler触发xDS的更新。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/config_event_handling.png)
+![img.png](docs/images/pilot/config_event_handling.png)
 
 ### ServiceController
 ServiceController（服务控制器）是服务发现的核心模块，主要功能是监听底层平台的服务注册中心，将平台服务模型转换成Istio服务模型并缓存；同时根据服务的变化，触发相关服务的事件处理回调函数的执行。
@@ -112,24 +113,24 @@ pilot/pkg/model/service.go:736
 
 #### 初始化流程
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/serviceController_init.png)
+![img.png](docs/images/pilot/serviceController_init.png)
 
 pilot/pkg/serviceregistry/kube/controller/controller.go:224
 
 Kubernetes控制器的核心就是监听Kubernetes相关资源(Service、Endpoint、EndpointSlice、Pod、Node) 的更新事件，执行相应的事件处理回调函数；并且进行从Kubernetes资源对象到Istio资源对象的转换，提供一定的缓存能力，主要是缓存Istio Service与WorkloadInstance。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/k8s_controller_keyAttributes_init.png)
+![img.png](docs/images/pilot/k8s_controller_keyAttributes_init.png)
 
 其中，Kubernetes控制器主要负责对4种资源的监听和处理，对于每种类型的资源，控制器分别启动了独立的Informer负责List-Watch, 并且分别注册了不同类型的事件处理函数（onServiceEvent、onPodEvent、onNodeEvent、onEvent）到队列中。
 
 #### 工作机制
 ServiceController为4种资源分别创建了Kubernetes Informer，用于监听Kubernetes资源的更新，并为其注册EventHandler。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/serviceController_informer.png)
+![img.png](docs/images/pilot/serviceController_informer.png)
 
 当监听到Service、Endpoint、Pod、Node资源更新时，EventHandler 会创建资源处理任务并将其推送到任务队列，然后由任务处理协程阻塞式地接收任务对象，最终调用任务处理函数完成对资源对象的事件处理。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/serviceController_event_handling.png)
+![img.png](docs/images/pilot/serviceController_event_handling.png)
 
 pilot/pkg/bootstrap/server.go:899
 
@@ -141,7 +142,7 @@ pilot/pkg/serviceregistry/kube/controller/controller.go:352
 #### 任务处理函数的注册
 Pilot通过XDSServer处理客户端的订阅请求，并完成xDS配置的生成与下发，而XDSServer的初始化由NewServer完成，因此从实现的角度考虑，将Istio任务处理函数的注册也放在了XDSServer对象的初始化流程中。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/istio_task_process_func_register.png)
+![img.png](docs/images/pilot/istio_task_process_func_register.png)
 
 其中，Config事件处理函数通过配置控制器的RegisterEventHandler方法注册，Service事件处理函数通过model.Controllcr.AppendServiceHandler方法注册。
 
@@ -166,7 +167,7 @@ pilot/pkg/xds/eds.go:65,101
 #### 资源更新事件处理：xDS分发
 从根本上讲，Config、Service、Endpoint对资源的处理最后都是通过调用ConfigUpdate方法向XDSServer的pushChannel队列发送PushRequest实现的。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/xDS_distribute.png)
+![img.png](docs/images/pilot/xDS_distribute.png)
 
 XDSServer首先通过handleUpdates线程阻塞式地接收并处理更新请求，并将PushRequest发送到XDSServer的pushQueue中，然后由sendPushes线程并发地将PushRequest发送给每一条连接的pushChannel，最后由XDSServer的流处理接口处理分发请求。
 
@@ -177,7 +178,7 @@ pilot/pkg/xds/discovery.go:355,363
 #### XDSServer的缓存更新
 数量最大的缓存是EndpointShardsByService（全量的IstioEndpoint集合），也是在Service、Endpoint更新时，ServiceController主要维护的缓存。EnvoyXdsServer根据EndpointShardsByService可以快速构建本轮需要下发的EDS配置。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/EndpointShardsByService_upgrade.png)
+![img.png](docs/images/pilot/EndpointShardsByService_upgrade.png)
 
 EndpointShardsByService的更新主要在以下两种情况下发生:
 
@@ -191,7 +192,7 @@ pilot/pkg/model/push_context.go:198,1179
 #### Pilot-push事件的发送及井发控制
 pilot/pkg/xds/discovery.go:482
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot/pilot_push_events_and_concurrency_control.png)
+![img.png](docs/images/pilot/pilot_push_events_and_concurrency_control.png)
 
 ### xDS配置的生成及分发
 pilot/pkg/xds/ads.go:738
@@ -224,7 +225,7 @@ pilot/pkg/bootstrap/istio_ca.go:148
 ### CA服务器的核心原理
 CA服务器在本质上是一个gRPC服务器，对外提供CreateCertificate接口，用于处理CSR请求，Istio所有工作负载证书的签发归根结底都会通过CreateCertificate接口进行。CA服务器默认基于TLS证书接收安全的gRPC连接。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/citadel/caServer_process.png)
+![img.png](docs/images/citadel/caServer_process.png)
 
 security/pkg/server/ca/server.go:76
 
@@ -280,7 +281,7 @@ Pilot-agent是Istio提供的进程，在注入istio-proxy容器时被启动，�
 ### 启动与监控
 Pilot-agent进程的首要功能是作为istio-proxy容器的启动入口进程，Pilot-agent进程在启动时对命令行参数、环境变量、Pod的metadata等信息进行加工，并创建Envoy进程启动配置文件/etc/istio/proxy/envoy-rev0.json，然后Pilot-agent进程启动Envoy进程并监控进程的运行状态（是否退出），只要Envoy进程退出，则整个Pod重启。
 
-![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot-agent/start_arch.png)
+![img.png](docs/images/pilot-agent/start_arch.png)
 
 pilot/cmd/pilot-agent/main.go:28
 
@@ -299,3 +300,13 @@ pkg/envoy/admin.go:39
 pkg/envoy/agent.go:217
 
 pkg/envoy/proxy.go:165
+
+### xDS转发服务
+
+![img.png](docs/images/pilot-agent/forwarding_arch_of_xDS.png)
+
+pkg/istio-agent/xds_proxy.go:126,655,298,304,374
+
+pkg/istio-agent/xds_proxy.go:448,725
+
+pkg/istio-agent/xds_proxy.go:522,612
