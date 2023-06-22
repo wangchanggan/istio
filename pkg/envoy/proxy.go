@@ -161,12 +161,15 @@ func (e *envoy) args(fname string, bootstrapConfig string) []string {
 
 var istioBootstrapOverrideVar = env.Register("ISTIO_BOOTSTRAP_OVERRIDE", "", "")
 
+// 在Envoy启动时传入命令行参数并监控Stdout、Stderr，等待Envoy进程退出:
 func (e *envoy) Run(abort <-chan error) error {
 	// spin up a new Envoy process
 	args := e.args(e.ConfigPath, istioBootstrapOverrideVar.Get())
 	log.Infof("Envoy command: %v", args)
 
 	/* #nosec */
+	// 创建Envoy命令行参数
+	// 监控stdout及stderr检查Envoy进程是否退出
 	cmd := exec.Command(e.BinaryPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -178,6 +181,7 @@ func (e *envoy) Run(abort <-chan error) error {
 		}
 	}
 
+	// 启动Envoy进程
 	if err := cmd.Start(); err != nil {
 		return err
 	}

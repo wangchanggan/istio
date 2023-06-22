@@ -97,11 +97,14 @@ type exitStatus struct {
 }
 
 // Run starts the envoy and waits until it terminates.
+// Pilot-agent进程启动Envoy进程后将进入等待状态，直到Envoy进程退出，然后
 func (a *Agent) Run(ctx context.Context) {
 	log.Info("Starting proxy agent")
+	// 启动Envoy进程
 	go a.runWait(a.abortCh)
 
 	select {
+	// Pilot-agent进程发现Envoy进程退出
 	case status := <-a.statusCh:
 		if status.err != nil {
 			if status.err.Error() == errOutOfMemory {
@@ -111,9 +114,11 @@ func (a *Agent) Run(ctx context.Context) {
 		} else {
 			log.Infof("Envoy exited normally")
 		}
-
+	// Pilot-agent进程退出
 	case <-ctx.Done():
+		// Envoy进程执行优雅退出流程
 		a.terminate()
+		// 等待Envoy进程退出
 		status := <-a.statusCh
 		if status.err == errAbort {
 			log.Infof("Envoy aborted normally")
@@ -126,6 +131,7 @@ func (a *Agent) Run(ctx context.Context) {
 
 func (a *Agent) terminate() {
 	log.Infof("Agent draining Proxy")
+	// 执行envoy.Drain方法
 	e := a.proxy.Drain()
 	if e != nil {
 		log.Warnf("Error in invoking drain listeners endpoint %v", e)
@@ -212,5 +218,6 @@ func (a *Agent) runWait(abortCh <-chan error) {
 	log.Infof("starting")
 	err := a.proxy.Run(abortCh)
 	a.proxy.Cleanup()
+	// 在Envoy进程退出时触发statusCh信号
 	a.statusCh <- exitStatus{err: err}
 }

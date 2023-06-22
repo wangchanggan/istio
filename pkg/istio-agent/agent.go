@@ -243,7 +243,9 @@ func (a *Agent) generateNodeMetadata() (*model.Node, error) {
 	})
 }
 
+// 负责创建Envoy启动配置文件envoy-rev0.json，0表示epoch值。
 func (a *Agent) initializeEnvoyAgent(ctx context.Context) error {
+	// 获取Pod元数据
 	node, err := a.generateNodeMetadata()
 	if err != nil {
 		return fmt.Errorf("failed to generate bootstrap metadata: %v", err)
@@ -259,6 +261,7 @@ func (a *Agent) initializeEnvoyAgent(ctx context.Context) error {
 		a.envoyOpts.ConfigPath = a.proxyConfig.CustomConfigFile
 		a.envoyOpts.ConfigCleanup = false
 	} else {
+		// 根据元数据通过bootstrap.New创建instance配置文件处理器并调用CreateFile方法
 		out, err := bootstrap.New(bootstrap.Config{
 			Node: node,
 		}).CreateFile()
@@ -327,8 +330,11 @@ func (a *Agent) initializeEnvoyAgent(ctx context.Context) error {
 }
 
 // Run is a non-blocking call which returns either an error or a function to await for completion.
+// Agent.Run方法负责创建本地DNS服务、证书缓存管理器secretCache、响应Envoy SDS请求的SDS服务器sdsServer、响应xDS请求的转发器xdsProxy
+// 井生成Envoy启动配置文件envoy-rev.json，创建用于应用运行状态监测的statusServer，最后启动Envoy子进程并进行监控
 func (a *Agent) Run(ctx context.Context) (func(), error) {
 	var err error
+	// 创建可选的本地DNS服务腊
 	if err = a.initLocalDNSServer(); err != nil {
 		return nil, fmt.Errorf("failed to start local DNS server: %v", err)
 	}
@@ -342,11 +348,13 @@ func (a *Agent) Run(ctx context.Context) (func(), error) {
 		log.Info("Workload SDS socket found. Istio SDS Server won't be started")
 	} else {
 		log.Info("Workload SDS socket not found. Starting Istio SDS Server")
+		// 创建SDS服务器
 		err = a.initSdsServer()
 		if err != nil {
 			return nil, fmt.Errorf("failed to start SDS server: %v", err)
 		}
 	}
+	// 创建xDS转发代理服务器
 	a.xdsProxy, err = initXdsProxy(a)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start xds proxy: %v", err)
@@ -382,9 +390,12 @@ func (a *Agent) Run(ctx context.Context) (func(), error) {
 		}
 
 		a.wg.Add(1)
+		// 创建Envoy-rev0.json启动配置文件
 		go func() {
+			// Envoy进程一旦退出，则通如主线程wait退出
 			defer a.wg.Done()
 			// This is a blocking call for graceful termination.
+			// 阻塞启动Envoy进程，等待进程退出
 			a.envoyAgent.Run(ctx)
 		}()
 	} else if a.WaitForSigterm() {
@@ -489,6 +500,9 @@ func (a *Agent) startFileWatcher(ctx context.Context, filePath string, handler f
 	}
 }
 
+// Pilot-agent进程根据启动配置中是否包含环境变量ISTIO_META_DNS_CAPTURE，判断是否使用LocalDNSServer创建本地DNS服务器，默认为不开启。
+// 如果希望开启此环境变量，可以配置Istio支持的proxyMetadata注解
+// 配置开启后，将观察到Pilot-agent进程启动了15053监听端口。
 func (a *Agent) initLocalDNSServer() (err error) {
 	// we don't need dns server on gateways
 	if a.cfg.DNSCapture && a.cfg.ProxyType == model.SidecarProxy {

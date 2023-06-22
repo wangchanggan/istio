@@ -56,6 +56,8 @@ var (
 	proxyArgs      options.ProxyArgs
 )
 
+// NewRootCommand负责通过Agent创建xds_proxy、sdsServer等服务，并创建statusServer服务
+// 初始化完毕后，通过agent.Run阻塞等待Plot-agent进程退出
 func NewRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:          "pilot-agent",
@@ -130,6 +132,7 @@ func newProxyCommand() *cobra.Command {
 			// https://tools.ietf.org/html/draft-ietf-oauth-token-exchange-16.
 			// STS is used for stackdriver or other Envoy services using google gRPC.
 			if proxyArgs.StsPort > 0 {
+				// 启动status监控服务
 				stsServer, err := initStsServer(proxy, secOpts.TokenManager)
 				if err != nil {
 					return err
@@ -170,10 +173,12 @@ func newProxyCommand() *cobra.Command {
 			go cmd.WaitSignalFunc(cancel)
 
 			// Start in process SDS, dns server, xds proxy, and Envoy.
+			// Agent初如化
 			wait, err := agent.Run(ctx)
 			if err != nil {
 				return err
 			}
+			// 等持Pllot-agent进程运行结束
 			wait()
 			return nil
 		},

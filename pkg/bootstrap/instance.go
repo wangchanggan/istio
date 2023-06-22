@@ -61,18 +61,21 @@ type instance struct {
 
 func (i *instance) WriteTo(templateFile string, w io.Writer) error {
 	// Get the input bootstrap template.
+	// 读取、解析模板文件并生成template.Template对象
 	t, err := newTemplate(templateFile)
 	if err != nil {
 		return err
 	}
 
 	// Create the parameters for the template.
+	// 转换Envoy配置数据，将要填充的数据转换为KV形式
 	templateParams, err := i.toTemplateParams()
 	if err != nil {
 		return err
 	}
 
 	// Execute the template.
+	// 填充模板参数
 	return t.Execute(w, templateParams)
 }
 
@@ -114,9 +117,12 @@ func (i *instance) CreateFile() (string, error) {
 		return "", err
 	}
 
+	// 获取Envoy启动配置的模板文件/var/lib/istio/envoy/envoy_bootstrap_tmpl.json
 	templateFile := GetEffectiveTemplatePath(i.Metadata.ProxyConfig)
 
+	// 确定配置文件的名称为envoy-rev.json
 	outputFilePath := configFile(i.Metadata.ProxyConfig.ConfigPath, templateFile)
+	// 创建配置文件
 	outputFile, err := os.Create(outputFilePath)
 	if err != nil {
 		return "", err
@@ -124,6 +130,7 @@ func (i *instance) CreateFile() (string, error) {
 	defer func() { _ = outputFile.Close() }()
 
 	// Write the content of the file.
+	// 将实际的启动参数填写到配置模板中，并生成/etc/istio/proxy/envoy-rev0.json文件
 	if err := i.WriteTo(templateFile, outputFile); err != nil {
 		return "", err
 	}

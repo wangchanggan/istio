@@ -43,6 +43,8 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
             -   [ValidatingWebhookConfiguration控制器的初始化](#validatingwebhookconfiguration控制器的初始化)
         -   [配置校验](#配置校验)
         -   [Validating控制器的实现](#validating控制器的实现)
+    -   [Pilot-agent](#pilot-agent)
+        -   [启动与监控](#启动与监控)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -271,3 +273,29 @@ pkg/webhooks/validation/server/server.go:200,129,204
 pkg/webhooks/validation/controller/controller.go:112,190,139
 
 pkg/kube/controllers/queue.go:110,147
+
+## Pilot-agent
+Pilot-agent是Istio提供的进程，在注入istio-proxy容器时被启动，负责数据面代理Envoy进程的启动及生命周期维护、Envoy与控制面Istiod进程的通信中转、证书的创建与轮转、健康检查探测等工作。
+
+### 启动与监控
+Pilot-agent进程的首要功能是作为istio-proxy容器的启动入口进程，Pilot-agent进程在启动时对命令行参数、环境变量、Pod的metadata等信息进行加工，并创建Envoy进程启动配置文件/etc/istio/proxy/envoy-rev0.json，然后Pilot-agent进程启动Envoy进程并监控进程的运行状态（是否退出），只要Envoy进程退出，则整个Pod重启。
+
+![](https://raw.githubusercontent.com/wangchanggan/istio/1.18.0/docs/images/pilot-agent/start_arch.png)
+
+pilot/cmd/pilot-agent/main.go:28
+
+pilot/cmd/pilot-agent/app/cmd.go:61,96
+
+pkg/istio-agent/agent.go:335,506,247
+
+pkg/bootstrap/instance.go:114,62
+
+pkg/envoy/agent.go:101,132
+
+pkg/envoy/proxy.go:99
+
+pkg/envoy/admin.go:39
+
+pkg/envoy/agent.go:217
+
+pkg/envoy/proxy.go:165

@@ -27,7 +27,9 @@ import (
 // No CLI parameters.
 func main() {
 	log.EnableKlogWithCobra()
+	// 使用NewRootCommand通过spf13库注册proxyCmd对象
 	rootCmd := app.NewRootCommand()
+	// 运行rootCmd对象Execute，触发proxyCmd回调方法
 	if err := rootCmd.Execute(); err != nil {
 		log.Error(err)
 		os.Exit(-1)

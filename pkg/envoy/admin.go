@@ -39,8 +39,10 @@ func Shutdown(adminPort uint32) error {
 func DrainListeners(adminPort uint32, inboundonly bool) error {
 	var drainURL string
 	if inboundonly {
+		// 给Envoy管理端口15000发送drain_listeners?graceful POST优雅退出请求
 		drainURL = "drain_listeners?inboundonly&graceful"
 	} else {
+		// 根据不同方向组织URL
 		drainURL = "drain_listeners?graceful"
 	}
 	res, err := doEnvoyPost(drainURL, "", "", adminPort)
