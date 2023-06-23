@@ -34,7 +34,9 @@ import (
 )
 
 // ConstructProxyConfig returns proxyConfig
+// 读取Pilot-agent进程的启动配置参数，在这个过程中将读取Pod注解的proxy.istio.io/confg中的ReadinessProbe配置
 func ConstructProxyConfig(meshConfigFile, serviceCluster, proxyConfigEnv string, concurrency int, role *model.Proxy) (*meshconfig.ProxyConfig, error) {
+	// 读取Pod注解
 	annotations, err := bootstrap.ReadPodAnnotations("")
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -55,8 +57,10 @@ func ConstructProxyConfig(meshConfigFile, serviceCluster, proxyConfigEnv string,
 	if err != nil {
 		return nil, err
 	}
+	// 默认配置中不开启ReadinessProbe
 	proxyConfig := mesh.DefaultProxyConfig()
 	if meshConfig.DefaultConfig != nil {
+		// 使用从meshConfig读取的注解部分覆盖默认的proxyConfig配置。
 		proxyConfig = meshConfig.DefaultConfig
 	}
 

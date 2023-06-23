@@ -46,6 +46,7 @@ var _ Prober = &Probe{}
 // Check executes the probe and returns an error if the probe fails.
 func (p *Probe) Check() error {
 	// First, check that Envoy has received a configuration update from Pilot.
+	// 检查Envoy进程是否从Pilot-agent进程接收到了启动配置
 	if err := p.checkConfigStatus(); err != nil {
 		return err
 	}
@@ -89,6 +90,7 @@ func (p *Probe) isEnvoyReady() error {
 		return nil
 	}
 	if p.Context == nil {
+		// 向Envoy进程的Admin 15000端口发送请求，要求检查Envoy进程是否已经处于ready状态
 		return p.checkEnvoyReadiness()
 	}
 	select {
@@ -106,13 +108,16 @@ func (p *Probe) checkEnvoyReadiness() error {
 	// does not use both of them, it is safe to cache this value. Since the
 	// actual readiness probe goes via Envoy, it ensures that Envoy is actively
 	// serving traffic and we can rely on that.
+	// 如果Envoy进程已经处于ready状态，则不再检查
 	if p.atleastOnceReady {
 		return nil
 	}
 
+	// 向Envoy进程发送检查请求
 	err := checkEnvoyStats(p.LocalHostAddr, p.AdminPort)
 	if err == nil {
 		metrics.RecordStartupTime()
+		// 第一次检查Envoy ready设置标志
 		p.atleastOnceReady = true
 	}
 	return err
@@ -120,6 +125,7 @@ func (p *Probe) checkEnvoyReadiness() error {
 
 // checkEnvoyStats actually executes the Stats Query on Envoy admin endpoint.
 func checkEnvoyStats(host string, port uint16) error {
+	// 组装HTTP探测请求
 	state, ws, err := util.GetReadinessStats(host, port)
 	if err != nil {
 		return fmt.Errorf("failed to get readiness stats: %v", err)

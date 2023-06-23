@@ -81,13 +81,16 @@ func fillInDefaults(cfg *v1alpha3.ReadinessProbe, ipAddresses []string) *v1alpha
 	return cfg
 }
 
+// 根据传入的ReadinessProbe方式类型为HTTP、TCP或执行用户定制的命令来创建探测对象
 func NewWorkloadHealthChecker(cfg *v1alpha3.ReadinessProbe, envoyProbe ready.Prober, proxyAddrs []string, ipv6 bool) *WorkloadHealthChecker {
 	// if a config does not exist return a no-op prober
 	if cfg == nil {
+		// 若未配置ReadinessProbe，则直接返回nil，不启动健康检查探测
 		return nil
 	}
 	cfg = fillInDefaults(cfg, proxyAddrs)
 	var prober Prober
+	// 判断健康检查方式
 	switch healthCheckMethod := cfg.HealthCheckMethod.(type) {
 	case *v1alpha3.ReadinessProbe_HttpGet:
 		prober = NewHTTPProber(healthCheckMethod.HttpGet, ipv6)
@@ -126,8 +129,10 @@ func orDefault(val int32, def int32) int32 {
 // PerformApplicationHealthCheck Performs the application-provided configuration health check.
 // Instead of a heartbeat-based health checks, we only send on a health state change, and this is
 // determined by the success & failure threshold provided by the user.
+// 创建健康检查任务并设置检查结果处理回调方法。
 func (w *WorkloadHealthChecker) PerformApplicationHealthCheck(callback func(*ProbeEvent), quit chan struct{}) {
 	if w == nil {
+		// 如果未配置健康检查器，则直接返回
 		return
 	}
 
@@ -143,7 +148,9 @@ func (w *WorkloadHealthChecker) PerformApplicationHealthCheck(callback func(*Pro
 
 	doCheck := func() {
 		// probe target
+		// 使用Probe方法进行ReadinessProbe探测
 		healthy, err := w.prober.Probe(w.config.ProbeTimeout)
+		// 判断健康检查结果
 		if healthy.IsHealthy() {
 			healthCheckLog.Debug("probe completed with healthy status")
 			// we were healthy, increment success counter
@@ -153,6 +160,8 @@ func (w *WorkloadHealthChecker) PerformApplicationHealthCheck(callback func(*Pro
 			// if we reached the threshold, mark the target as healthy
 			if numSuccess == w.config.SuccessThresh && lastState != lastStateHealthy {
 				healthCheckLog.Info("success threshold hit, marking as healthy")
+				// 调用健康检查结果处理回调方法
+				// 根据健康检查结果执行传人的callback回调方法
 				callback(&ProbeEvent{Healthy: true})
 				numSuccess = 0
 				lastState = lastStateHealthy
@@ -178,14 +187,18 @@ func (w *WorkloadHealthChecker) PerformApplicationHealthCheck(callback func(*Pro
 	}
 
 	// Send the first request immediately
+	// 启动探测服务时马上做一次检查
 	doCheck()
+	// 创建健康检查定时器
 	periodTicker := time.NewTicker(w.config.CheckFrequency)
 	defer periodTicker.Stop()
+	// 启动定时器执行doCheck方法
 	for {
 		select {
 		case <-quit:
 			return
 		case <-periodTicker.C:
+			// 定期执行健康检查任务
 			doCheck()
 		}
 	}

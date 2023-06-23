@@ -139,11 +139,13 @@ func initXdsProxy(ia *Agent) (*XdsProxy, error) {
 
 	cache := wasm.NewLocalFileCache(constants.IstioDataDir, ia.cfg.WASMOptions)
 	proxy := &XdsProxy{
-		istiodAddress:         ia.proxyConfig.DiscoveryAddress,
-		istiodSAN:             ia.cfg.IstiodSAN,
-		clusterID:             ia.secOpts.ClusterID,
-		handlers:              map[string]ResponseHandler{},
-		stopChan:              make(chan struct{}),
+		istiodAddress: ia.proxyConfig.DiscoveryAddress,
+		istiodSAN:     ia.cfg.IstiodSAN,
+		clusterID:     ia.secOpts.ClusterID,
+		handlers:      map[string]ResponseHandler{},
+		stopChan:      make(chan struct{}),
+		// 使用proxyConig.ReadinessProbe配置创建healthChecker线程
+		// 创建健康检查器，若proxyConfig中未配置，则返回nil
 		healthChecker:         health.NewWorkloadHealthChecker(ia.proxyConfig.ReadinessProbe, envoyProbe, ia.cfg.ProxyIPAddresses, ia.cfg.IsIPv6),
 		xdsHeaders:            ia.cfg.XDSHeaders,
 		xdsUdsPath:            ia.cfg.XdsUdsPath,
@@ -198,6 +200,7 @@ func initXdsProxy(ia *Agent) (*XdsProxy, error) {
 		}
 	}()
 
+	// 创建健康检查线程并设置检查结果处理回调方法
 	go proxy.healthChecker.PerformApplicationHealthCheck(func(healthEvent *health.ProbeEvent) {
 		// Store the same response as Delta and SotW. Depending on how Envoy connects we will use one or the other.
 		req := &discovery.DiscoveryRequest{TypeUrl: v3.HealthInfoType}
@@ -207,6 +210,7 @@ func initXdsProxy(ia *Agent) (*XdsProxy, error) {
 				Message: healthEvent.UnhealthyMessage,
 			}
 		}
+		// 将检查结果发送到控制面Istiod
 		proxy.sendHealthCheckRequest(req)
 		deltaReq := &discovery.DeltaDiscoveryRequest{TypeUrl: v3.HealthInfoType}
 		if !healthEvent.Healthy {

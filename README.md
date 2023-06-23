@@ -47,6 +47,11 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
         -   [启动与监控](#启动与监控)
         -   [xDS转发服务](#xds转发服务)
         -   [SDS证书服务](#sds证书服务)
+        -   [健康检查](#健康检查)
+            -   [应用容器的LivenessProbe探测](#应用容器的livenessprobe探测)
+            -   [应用容器的ReadinessProbe探测](#应用容器的readinessprobe探测)
+            -   [Envoy进程的ReadinessProbe探测](#envoy进程的readinessprobe探测)
+            -   [Pilot-agent进程的LivenessProbe探测](#pilot-agent进程的livenessprobe探测)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -306,11 +311,11 @@ pkg/envoy/proxy.go:165
 
 ![img.png](docs/images/pilot-agent/forwarding_arch_of_xDS.png)
 
-pkg/istio-agent/xds_proxy.go:126,655,298,304,374
+pkg/istio-agent/xds_proxy.go:126,659,302,308,378
 
-pkg/istio-agent/xds_proxy.go:448,725
+pkg/istio-agent/xds_proxy.go:452,729
 
-pkg/istio-agent/xds_proxy.go:522,612
+pkg/istio-agent/xds_proxy.go:526,616
 
 ### SDS证书服务
 SDS消息由Pilot-agent进程内的sdsServer模块处理，sdsServer负责Envoy进程启动后证书的创建及定期轮转。之所以SDS消息没有与其他xDS一起通过XdsProxy代理处理并被直接转发到Istiod控制面，一个主要原因是证书创建过程中不是简单地对原始SDS消息进行转发，而需要由Pilot-agent进程接收SDS请求后根据请求内容创建证书申请消息CSR。在此过程中，Pilot-agent进程需要创建私钥和公钥，如果直接将私钥发送到网络上，则会增加安全风险。因此，如果将CSR处理放在istio-proxy容器内，则不会有此类问题。另一个原因是，由Pilot-agent进程在证书创建过程中向Istiod控制面发送标准CSR而不是其他私有证书生成协议，可以使证书创建过程更加标准化，使得Pilot-agent进程可以对接除Istiod的多种证书服务器。
@@ -340,3 +345,184 @@ security/pkg/nodeagent/sds/sdsservice.go:184,159
 security/pkg/nodeagent/cache/secretcache.go:252,564,654
 
 security/pkg/nodeagent/sds/server.go:59
+
+### 健康检查
+Envoy健康检查遵循Kubernetes标准，主要分为ReadinessProbe、LivenessProbe两大类。LivenessProbe用于判断服务是否存在，ReadinessProbe用于进一步判断服务是否准备好。这两个探测选项在应用Pod中是可选配置，如果没有指定，则Istio认为应用容器启动后就可以提供服务。但需要注意的是，在Istio中，由于自动注人了istio-proxy容器，因此也需要判断其中的Pilot-agent进程及Envoy进程是否处于可用状态，在注入过程中会自动添加对Pilot-agent进程及Envoy进程进行判断的ReadinessProbe，这样Kubelet在运行中也会自动发送对每个带有注入容器的应用Pod的探测。
+
+#### 应用容器的LivenessProbe探测
+
+![img.png](docs/images/pilot-agent/app_container_livenessprobe.png)
+
+如果需要启动应用的LivenessProbe探测，需要在应用容器的Deployment文件中配置：
+
+```
+spec:
+  containers:
+  - name: frontend
+    #  开启LivenessProbe探测
+    livenessProbe:
+	  # 设置探测方式
+      httpGet:
+        path: /healthz
+        port: 8080
+		......
+```
+
+上面的配置告知Kubelet定期向应用Pod发送HTTP探测请求，该请求在没有使用Istio网格的情况下将直接被应用容器接收，但在注入了istio-proxy容器后，处理路径发生了变化。可以通过kubectl get pod命令获取已经启动的Pod描述文件，发现LivenessProbe已经被修改为如下形式:
+
+```
+spec:
+  containers:
+  ......
+  #开启LivenessProbe探测
+  livenessProbe:
+    failureThreshold: 3
+	httpGet:
+	  # 探测目标被修改为新URL
+	  path: /app-health/frontend/livez
+	  # 探测目标端口为Pilot-agent监听端口
+	  port: 15020
+	  scheme: HTTP
+```
+
+LivenessProbe的探测URL已经被修改为以/app-health开头、livez结尾的URL形式，中间为应用容器的名称。探测端口被修改为Pilot-agent监听端口15020。当Kubelet发送探测请求时，该HTTP请求将被直接发送到Pilot-agent进程。在Pilot-agent进程运行时启动statusServer，其线程任务管理器将安装/app-health处理器handleAppProbe
+
+pilot/cmd/pilot-agent/status/server.go:354,671,697
+
+#### 应用容器的ReadinessProbe探测
+
+![img.png](docs/images/pilot-agent/app_container_readinessprobe.png)
+
+与应用的LivenessProbe处理流程非常相似，也需要在应用容器Deployment文件中配置ReadinessProbe选项:
+
+```
+spec:
+  containers:
+  - name: frontend
+    # 开启ReadinessProbe探测
+    readinessProbe:
+	  # 失败3次后重启
+	  failureThreshold: 3
+	  httpGet:
+	    # 探测URL地址
+		path: /app-health/frontend/readyz
+		port: 15020
+		scheme: HTTP
+	  periodSeconds: 10
+	  successThreshold: 1
+	  timeoutSeconds: 1
+```
+
+与LivenessProbe不同的是ReadinessProbe的URL后缀变为readyz，这样就会在Pilot-agent进程对HTTP请求进行处理的handleAppProbeHTTPGet中匹配到不同的KubeAppProbers，并组成向应用容器发送的ReadinessProbe探测请求。
+
+#### Envoy进程的ReadinessProbe探测
+
+![img.png](docs/images/pilot-agent/envoy_readinessprobe.png)
+
+针对Sidecar内系统服务的ReadinessProbe探测，是通过在自动注入过程中对istio-proxy容器的Deployment文件增加ReadinessProbe配置实现的。
+
+```
+spec:
+  containers:
+  - name: istio-proxy
+    # 开启Envoy进程的ReadinessProbe探测
+    readinessProbe:
+	  failureThreshold: 30
+	  httpGet:
+	    # 固定探测路径
+		path: /healthz/ready
+		# 固定探测端口指向Envoy进程
+		port: 15021
+		scheme: HTTP
+	  initialDelaySeconds: 1
+	  periodSeconds: 2
+	  successThreshold: 1
+	  timeoutSeconds: 3
+```
+
+使用kubelet命令向Envoy 15000的Admin端口发送/config_dump命令来得到监听器配置：
+
+```
+"address": {
+  "socket_address": {
+    "address": "0.0.0.0",
+	# 匹配Envoy监听器
+	"port_value": 15021
+  }
+}
+"filter_chains": [
+{
+  "filters": [
+  {
+    "name": "envoy.filters.network.http_connection_manager",
+	"typed_config": {
+	  "@type": "type.googleapis.com/envoy.extonsions.fllters.network.http_connection_manager.v3.HttpConnectionManager",
+	  "stat preflx": "agent",
+	  "route_config": {
+	    "virtual_hosts": [
+		......
+		  "routes": [
+		  {
+		    "match": {
+			  # 匹配URL
+			  "prefix": "/healthz/ready"
+		    },
+			"route": {
+			  # 路由到目标pilot-agent服务
+			  "cluster": "agent"
+			}
+```
+
+对15021端口的ReadinessProbe请求经过/healthz/ready的URL匹配后，路由到目标agent服务，其目标服务Cluster配置如下：
+
+```
+{
+  "name": "agent",
+  "type": "STATIC",
+  "connect_timeout": "0.250s",
+  "load_assignment": {
+    "cluster_name": "agent",
+	"endpoints": [
+	{
+	  "lb_endpoints": [
+	  {
+	    "endpoint": {
+		  "address": {
+		    "socket_address": {
+			  "address": "127.0.0.1",
+			  "port_value": 15020
+```
+
+agent最终连接到Pilot-agent进程的15020端口，其恰好是Pilot-agent进程的statusServer服务端口，并根据原始URL请求地址匹配handleReadyProbe方法。
+
+pilot/cmd/pilot-agent/status/server.go:347,466
+
+pilot/cmd/pilot-agent/status/ready/probe.go:47,88,104,127
+
+pilot/cmd/pilot-agent/status/util/stats.go:71
+
+#### Pilot-agent进程的LivenessProbe探测
+
+![img.png](docs/images/pilot-agent/pilot-agent_livenessprobe.png)
+
+除了由Kubelet触发ReadinessProbe探测，Pilot-agent进程也可以作为探测发起者向应用发送ReadinessProbe探测。此功能默认不开启，不过可以在应用的Deployment文件的注解部分设置开启，开启方式如下：
+
+```
+spec:
+  selector:
+    matchLabels:
+	  app: frontend
+	  ......
+	  annotations:
+	    proxy.istio.io/config: |
+		  readinessProbe:
+		    httpGet:
+			  path: /healthz
+			  port: 8080
+```
+
+pilot/cmd/pilot-agent/config/config.go:38
+
+pkg/istio-agent/xds_proxy.go:149,204,214
+
+pkg/istio-agent/health/health_check.go:85,133

@@ -462,12 +462,17 @@ func (s *Server) handleReadyProbe(w http.ResponseWriter, _ *http.Request) {
 	s.mutex.Unlock()
 }
 
+// 对istio-proxy中的各个系统组件进行探测
 func (s *Server) isReady() error {
 	for _, p := range s.ready {
+		// 调用每个Probe探测器的Check方法
+		// Pilot-agent进程中的每个Probe探测器与一种系统配置的探测对应
+		// 如向Envoy进程发送HTTP请求的探测、Pilot-agent运行状态的探测等。
 		if err := p.Check(); err != nil {
 			return err
 		}
 	}
+	// 当执行isReady内所有的Check方法并成功返回时，表示Envoy进程及Pilot-agent进程处于可提供服务的状态。
 	return nil
 }
 
@@ -662,6 +667,7 @@ func (s *Server) handleQuit(w http.ResponseWriter, r *http.Request) {
 	notifyExit()
 }
 
+// 支持多种探测协议，如HTTP、GRPC、TCP
 func (s *Server) handleAppProbe(w http.ResponseWriter, req *http.Request) {
 	// Validate the request first.
 	path := req.URL.Path
@@ -686,6 +692,8 @@ func (s *Server) handleAppProbe(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// 使用Pod地址和KubeAppProbers中保存的应用LivenessProbe端口信息来重新生成应用探测请求，然后发送HTTP探测请求。
+// 由于Pilotagent进程与Envoy进程拥有相同的UID=1337，因此请求不会被iptables再次拦截进人Envoy进程，而是直接发送到目标应用容器。
 func (s *Server) handleAppProbeHTTPGet(w http.ResponseWriter, req *http.Request, prober *Prober, path string) {
 	proberPath := prober.HTTPGet.Path
 	if !strings.HasPrefix(proberPath, "/") {
@@ -693,6 +701,7 @@ func (s *Server) handleAppProbeHTTPGet(w http.ResponseWriter, req *http.Request,
 	}
 	var url string
 
+	// 生成新的探测URL
 	hostPort := net.JoinHostPort(s.appProbersDestination, strconv.Itoa(prober.HTTPGet.Port.IntValue()))
 	if prober.HTTPGet.Scheme == apimirror.URISchemeHTTPS {
 		url = fmt.Sprintf("https://%s%s", hostPort, proberPath)

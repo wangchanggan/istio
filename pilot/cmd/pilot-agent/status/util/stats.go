@@ -75,6 +75,7 @@ func GetReadinessStats(localHostAddr string, adminPort uint16) (*uint64, bool, e
 	}
 
 	hostPort := net.JoinHostPort(localHostAddr, strconv.Itoa(int(adminPort)))
+	// 拼接请求URL
 	readinessURL := fmt.Sprintf("http://%s/stats?usedonly&filter=%s", hostPort, readyStatsRegex)
 	stats, err := http.DoHTTPGetWithTimeout(readinessURL, readinessTimeout)
 	if err != nil {
