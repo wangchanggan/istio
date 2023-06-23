@@ -170,7 +170,10 @@ func NewSecretManagerClient(caClient security.Client, options *security.Options)
 	}
 
 	ret := &SecretManagerClient{
-		queue:         queue.NewDelayed(queue.DelayQueueBuffer(0)),
+		// 创建证书过期轮转触发队列，队列中保存每个证书的过期时间及过期后需要触发的动作
+		// 这样在新证书生成后被添加到此队列中时，需要同时计算到期时间，在证书到期后将刷新证书内容
+		queue: queue.NewDelayed(queue.DelayQueueBuffer(0)),
+		// Citadel客户端
 		caClient:      caClient,
 		configOptions: options,
 		existingCertificateFile: security.SdsCertificateConfig{
@@ -184,6 +187,7 @@ func NewSecretManagerClient(caClient security.Client, options *security.Options)
 		caRootPath:  options.CARootPath,
 	}
 
+	// 启动证移过期轮转触发队列过期监控
 	go ret.queue.Run(ret.stop)
 	go ret.handleFileWatch()
 	return ret, nil
@@ -197,6 +201,8 @@ func (sc *SecretManagerClient) Close() {
 	close(sc.stop)
 }
 
+// 注册证书轮转回调方法OnSecretUpdate
+// 若创建的证书在前面的DelayQueue中被判定为过期，将自动触发该回调方法重新申请证书
 func (sc *SecretManagerClient) RegisterSecretHandler(h func(resourceName string)) {
 	sc.certMutex.Lock()
 	defer sc.certMutex.Unlock()
@@ -242,6 +248,7 @@ func (sc *SecretManagerClient) getCachedSecret(resourceName string) (secret *sec
 }
 
 // GenerateSecret passes the cached secret to SDS.StreamSecrets and SDS.FetchSecret.
+// 根据资源名称生成CSR，并将其发送到控制面并返回创建的证书
 func (sc *SecretManagerClient) GenerateSecret(resourceName string) (secret *security.SecretItem, err error) {
 	cacheLog.Debugf("generate secret %q", resourceName)
 	// Setup the call to store generated secret to disk
@@ -274,6 +281,7 @@ func (sc *SecretManagerClient) GenerateSecret(resourceName string) (secret *secu
 		return ns, nil
 	}
 
+	// 如果证书已经在级存中，则跳过生成步骤
 	ns := sc.getCachedSecret(resourceName)
 	if ns != nil {
 		return ns, nil
@@ -294,12 +302,14 @@ func (sc *SecretManagerClient) GenerateSecret(resourceName string) (secret *secu
 	}
 
 	// send request to CA to get new workload certificate
+	// 生成CSR并将其发送到证书创建中心，得到返回的证书对象
 	ns, err = sc.generateNewSecret(resourceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate workload certificate: %v", err)
 	}
 
 	// Store the new secret in the secretCache and trigger the periodic rotation for workload certificate
+	// 将证书保存到Pilot-agent缓存中并启动轮转监控
 	sc.registerSecret(*ns)
 
 	if resourceName == security.RootCertReqResourceName {
@@ -561,6 +571,7 @@ func (sc *SecretManagerClient) generateNewSecret(resourceName string) (*security
 	t0 := time.Now()
 	logPrefix := cacheLogPrefix(resourceName)
 
+	// 根据TrustDomain、WorkloadNamepace、ServiceAccount创建证书申请对象CSR
 	csrHostName := &spiffe.Identity{
 		TrustDomain:    sc.configOptions.TrustDomain,
 		Namespace:      sc.configOptions.WorkloadNamespace,
@@ -577,6 +588,7 @@ func (sc *SecretManagerClient) generateNewSecret(resourceName string) (*security
 	}
 
 	// Generate the cert/key, send CSR to CA.
+	// 本地计算得到CSR对象、私钥
 	csrPEM, keyPEM, err := pkiutil.GenCSR(options)
 	if err != nil {
 		cacheLog.Errorf("%s failed to generate key and certificate for CSR: %v", logPrefix, err)
@@ -585,6 +597,7 @@ func (sc *SecretManagerClient) generateNewSecret(resourceName string) (*security
 
 	numOutgoingRequests.With(RequestType.Value(monitoring.CSR)).Increment()
 	timeBeforeCSR := time.Now()
+	// 使用caclient向Citadel发送CSR并获取Istio签发的x509证书。
 	certChainPEM, err := sc.caClient.CSRSign(csrPEM, int64(sc.configOptions.SecretTTL.Seconds()))
 	if err == nil {
 		trustBundlePEM, err = sc.caClient.GetRootCertBundle()
@@ -637,7 +650,9 @@ func (sc *SecretManagerClient) rotateTime(secret security.SecretItem) time.Durat
 	return delay
 }
 
+// 将新创建的证书添加到Pilot-agent缓存中，同时将证书添加到证书过期轮转监控队列中
 func (sc *SecretManagerClient) registerSecret(item security.SecretItem) {
+	// 证书轮转检测，默认周期为12小时
 	delay := sc.rotateTime(item)
 	certExpirySeconds.ValueFrom(func() float64 { return time.Until(item.ExpireTime).Seconds() }, item.ResourceName)
 	item.ResourceName = security.WorkloadKeyCertResourceName
@@ -646,13 +661,17 @@ func (sc *SecretManagerClient) registerSecret(item security.SecretItem) {
 		resourceLog(item.ResourceName).Infof("skip scheduling certificate rotation, already scheduled")
 		return
 	}
+	// 将证书添加到本地缓存中
 	sc.cache.SetWorkload(&item)
 	resourceLog(item.ResourceName).Debugf("scheduled certificate for rotation in %v", delay)
+	// 添加轮转任务
 	sc.queue.PushDelayed(func() error {
 		resourceLog(item.ResourceName).Debugf("rotating certificate")
 		// Clear the cache so the next call generates a fresh certificate
+		// 证书到期后清空证书本地缓存
 		sc.cache.SetWorkload(nil)
 
+		// 调用证书更新回调方法
 		sc.OnSecretUpdate(item.ResourceName)
 		return nil
 	}, delay)

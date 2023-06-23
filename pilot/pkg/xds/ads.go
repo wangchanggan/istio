@@ -144,6 +144,7 @@ func (s *DiscoveryServer) receive(con *Connection, identities []string) {
 
 	firstRequest := true
 	for {
+		// 调用stream.Recv接收SDS请求
 		req, err := con.stream.Recv()
 		if err != nil {
 			if istiogrpc.IsExpectedGRPCError(err) {
@@ -176,6 +177,7 @@ func (s *DiscoveryServer) receive(con *Connection, identities []string) {
 		}
 
 		select {
+		// 将请求发送到con.reqChan队列中，后续可以并行处理与接收请求，提升处理性能。
 		case con.reqChan <- req:
 		case <-con.stream.Context().Done():
 			log.Infof("ADS: %q %s terminated with stream closed", con.peerAddr, con.conID)
@@ -237,6 +239,7 @@ func (s *DiscoveryServer) StreamAggregatedResources(stream DiscoveryStream) erro
 	return s.Stream(stream)
 }
 
+// 处理SDS请求的主要方法，负责处理来自Envoy进程的SDS请求并将生成的证书发送回Envoy
 func (s *DiscoveryServer) Stream(stream DiscoveryStream) error {
 	if knativeEnv != "" && firstRequest.Load() {
 		// How scaling works in knative is the first request is the "loading" request. During
@@ -286,6 +289,7 @@ func (s *DiscoveryServer) Stream(stream DiscoveryStream) error {
 		log.Warnf("Error reading config %v", err)
 		return status.Error(codes.Unavailable, "error reading config")
 	}
+	// 记录Envoy进程的UDS连接
 	con := newConnection(peerAddr, stream)
 
 	// Do not call: defer close(con.pushChannel). The push channel will be garbage collected
@@ -295,6 +299,7 @@ func (s *DiscoveryServer) Stream(stream DiscoveryStream) error {
 
 	// Block until either a request is received or a push is triggered.
 	// We need 2 go routines because 'read' blocks in Recv().
+	// 接收下游Envoy进程的SDS请求并放入reqChan队列
 	go s.receive(con, ids)
 
 	// Wait for the proxy to be fully initialized before we start serving traffic. Because
@@ -309,8 +314,10 @@ func (s *DiscoveryServer) Stream(stream DiscoveryStream) error {
 		// For requests, these are higher priority (client may be blocked on startup until these are done)
 		// and often very cheap to handle (simple ACK), so we check it first.
 		select {
+		// 从reqChan队列取出SDS请求
 		case req, ok := <-con.reqChan:
 			if ok {
+				// 处理SDS请求
 				if err := s.processRequest(req, con); err != nil {
 					return err
 				}

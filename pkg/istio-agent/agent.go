@@ -419,6 +419,8 @@ func (a *Agent) initSdsServer() error {
 		a.secOpts.FileMountedCerts = true
 	}
 
+	// 创建证书本地缓存并创建与Istiod控制面负责证书生成的caServer的连接
+	// 这个连接支持使用不同CA证书的客户端，默认使用Citadel CA证书的Citadel客户端。
 	a.secretCache, err = a.newSecretManager()
 	if err != nil {
 		return fmt.Errorf("failed to start workload secret manager %v", err)
@@ -441,8 +443,10 @@ func (a *Agent) initSdsServer() error {
 			_, _ = a.getWorkloadCerts(st)
 		}()
 	} else {
+		// 启动sdsScrver服务并接收来自/etc/istio/proxy/SDS UDS通道的SDS请求。
 		pkpConf := a.proxyConfig.GetPrivateKeyProvider()
 		a.sdsServer = sds.NewServer(a.secOpts, a.secretCache, pkpConf)
+		// 设置证书轮转回调方法处理证书过期后的自动申请延期任务。
 		a.secretCache.RegisterSecretHandler(a.sdsServer.OnSecretUpdate)
 	}
 
@@ -776,6 +780,9 @@ func getKeyCertInner(certPath string) (string, string) {
 }
 
 // newSecretManager creates the SecretManager for workload secrets
+// 根据Pilot-agent进程启动配置创建用于申请证书的客户端，这个客户端支持多种证书创建方式，
+// 如基于本地挂载目录的客户端、Kubernetes JWT的gca.NewGoogleCAClient客户端、Citadel CA的客户端等，
+// 默认情况下创建与Istiod控制面连接的citadel.NewCitadelClient客户端
 func (a *Agent) newSecretManager() (*cache.SecretManagerClient, error) {
 	// If proxy is using file mounted certs, we do not have to connect to CA.
 	if a.secOpts.FileMountedCerts {

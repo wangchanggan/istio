@@ -58,11 +58,15 @@ type sdsservice struct {
 // Assert we implement the generator interface
 var _ model.XdsResourceGenerator = &sdsservice{}
 
+// 创建xDS服务器，只用于处理Envoy进程的SDS请求。
 func NewXdsServer(stop chan struct{}, gen model.XdsResourceGenerator) *xds.DiscoveryServer {
+	// 创建simple xDS服务器并启动
+	// 创建完成后由于还没有绑定监听器，因此还不能接收Envoy进程发送来的SDS请求。
 	s := xds.NewXDS(stop)
 	// No ratelimit for SDS calls in agent.
 	s.DiscoveryServer.RequestRateLimit = rate.NewLimiter(0, 1)
 	s.DiscoveryServer.Generators = map[string]model.XdsResourceGenerator{
+		// 仅处理SDS类型请求
 		v3.SecretType: gen,
 	}
 	s.DiscoveryServer.ProxyNeedsPush = func(proxy *model.Proxy, req *model.PushRequest) bool {
@@ -91,17 +95,20 @@ func NewXdsServer(stop chan struct{}, gen model.XdsResourceGenerator) *xds.Disco
 		}
 		return found
 	}
+	// 启动xDS服务器
 	s.DiscoveryServer.Start(stop)
 	return s.DiscoveryServer
 }
 
 // newSDSService creates Secret Discovery Service which implements envoy SDS API.
+// 创建与XdsServer相关的gRPC服务器
 func newSDSService(st security.SecretManager, options *security.Options, pkpConf *mesh.PrivateKeyProvider) *sdsservice {
 	ret := &sdsservice{
 		st:      st,
 		stop:    make(chan struct{}),
 		pkpConf: pkpConf,
 	}
+	// 创建内置的处理xDS请求的gRPC服务器，用于处理Envoy进程发送来的SDS请求
 	ret.XdsServer = NewXdsServer(ret.stop, ret)
 
 	ret.rootCaPath = options.CARootPath
@@ -114,6 +121,7 @@ func newSDSService(st security.SecretManager, options *security.Options, pkpConf
 	// case we always write a certificate. A workload can technically run without any mTLS/CA
 	// configured, in which case this will fail; if it becomes noisy we should disable the entire SDS
 	// server in these cases.
+	// 启动时预先创建Envoy进程所需的证书，用于启动加速
 	go func() {
 		// TODO: do we need max timeout for retry, seems meaningless to retry forever if it never succeed
 		b := backoff.NewExponentialBackOff(backoff.DefaultOption())
@@ -128,11 +136,13 @@ func newSDSService(st security.SecretManager, options *security.Options, pkpConf
 		}()
 		defer cancel()
 		_ = b.RetryWithContext(ctx, func() error {
+			// 用常量名称default预先创建工作负载证书
 			_, err := st.GenerateSecret(security.WorkloadKeyCertResourceName)
 			if err != nil {
 				sdsServiceLog.Warnf("failed to warm certificate: %v", err)
 				return err
 			}
+			// 用常量名称ROOTCA预先创建CA证书
 			_, err = st.GenerateSecret(security.RootCertReqResourceName)
 			if err != nil {
 				sdsServiceLog.Warnf("failed to warm root certificate: %v", err)
@@ -196,6 +206,7 @@ func (s *sdsservice) register(rpcs *grpc.Server) {
 }
 
 // StreamSecrets serves SDS discovery requests and SDS push requests
+// 由于创建了sdsSever并启动了监听器，当收到Envoy进程发送来的SDS请求时，请求将被gRPC服务自动解析后进人StreamSecrets回调方法
 func (s *sdsservice) StreamSecrets(stream sds.SecretDiscoveryService_StreamSecretsServer) error {
 	return s.XdsServer.Stream(stream)
 }

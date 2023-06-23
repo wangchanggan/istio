@@ -46,6 +46,7 @@ https://github.com/istio/istio/archive/refs/tags/1.18.0.zip
     -   [Pilot-agent](#pilot-agent)
         -   [启动与监控](#启动与监控)
         -   [xDS转发服务](#xds转发服务)
+        -   [SDS证书服务](#sds证书服务)
 
 ## Pilot
 Pilot是 Istio控制面的核心组件,它的主要职责有如下两个：
@@ -195,7 +196,7 @@ pilot/pkg/xds/discovery.go:482
 ![img.png](docs/images/pilot/pilot_push_events_and_concurrency_control.png)
 
 ### xDS配置的生成及分发
-pilot/pkg/xds/ads.go:738
+pilot/pkg/xds/ads.go:741
 
 pilot/pkg/xds/xdsgen.go:97
 
@@ -287,7 +288,7 @@ pilot/cmd/pilot-agent/main.go:28
 
 pilot/cmd/pilot-agent/app/cmd.go:61,96
 
-pkg/istio-agent/agent.go:335,506,247
+pkg/istio-agent/agent.go:335,510,247
 
 pkg/bootstrap/instance.go:114,62
 
@@ -310,3 +311,32 @@ pkg/istio-agent/xds_proxy.go:126,655,298,304,374
 pkg/istio-agent/xds_proxy.go:448,725
 
 pkg/istio-agent/xds_proxy.go:522,612
+
+### SDS证书服务
+SDS消息由Pilot-agent进程内的sdsServer模块处理，sdsServer负责Envoy进程启动后证书的创建及定期轮转。之所以SDS消息没有与其他xDS一起通过XdsProxy代理处理并被直接转发到Istiod控制面，一个主要原因是证书创建过程中不是简单地对原始SDS消息进行转发，而需要由Pilot-agent进程接收SDS请求后根据请求内容创建证书申请消息CSR。在此过程中，Pilot-agent进程需要创建私钥和公钥，如果直接将私钥发送到网络上，则会增加安全风险。因此，如果将CSR处理放在istio-proxy容器内，则不会有此类问题。另一个原因是，由Pilot-agent进程在证书创建过程中向Istiod控制面发送标准CSR而不是其他私有证书生成协议，可以使证书创建过程更加标准化，使得Pilot-agent进程可以对接除Istiod的多种证书服务器。
+
+![img.png](docs/images/pilot-agent/SDS_cert_process.png)
+
+pkg/istio-agent/agent.go:412,786
+
+security/pkg/nodeagent/cache/secretcache.go:166
+
+security/pkg/nodeagent/sds/server.go:49
+
+security/pkg/nodeagent/sds/sdsservice.go:105,62
+
+security/pkg/nodeagent/sds/server.go:89
+
+security/pkg/nodeagent/cache/secretcache.go:206
+
+security/pkg/nodeagent/sds/sdsservice.go:210
+
+pilot/pkg/xds/ads.go:241,133,192
+
+pilot/pkg/xds/xdsgen.go:97
+
+security/pkg/nodeagent/sds/sdsservice.go:184,159
+
+security/pkg/nodeagent/cache/secretcache.go:252,564,654
+
+security/pkg/nodeagent/sds/server.go:59

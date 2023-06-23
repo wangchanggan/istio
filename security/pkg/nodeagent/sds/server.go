@@ -45,6 +45,7 @@ type Server struct {
 }
 
 // NewServer creates and starts the Grpc server for SDS.
+// 创建用于接收Envoy进程发送的SDS请求的sdsServer
 func NewServer(options *security.Options, workloadSecretCache security.SecretManager, pkpConf *mesh.PrivateKeyProvider) *Server {
 	s := &Server{stopped: atomic.NewBool(false)}
 	s.workloadSds = newSDSService(workloadSecretCache, options, pkpConf)
@@ -52,6 +53,9 @@ func NewServer(options *security.Options, workloadSecretCache security.SecretMan
 	return s
 }
 
+// 根据资源名称resourceName重新创建PushRequest请求并模拟SDS请求从Envoy进程发出的行为
+// 之后将该SDS请求发送到UDS通道对应的xdsServer，从而该SDS请求可以经过相同的路径被Pilot-agent进程的StreamSecret回调方法接收和处理
+// 之后经历相同的证书生成过程，得到新生成的证书，将其保存到本地环境并添加到证书轮转监控队列后发送到Envoy进程。
 func (s *Server) OnSecretUpdate(resourceName string) {
 	if s.workloadSds == nil {
 		return
@@ -59,7 +63,8 @@ func (s *Server) OnSecretUpdate(resourceName string) {
 	s.workloadSds.XdsServer.Push(&model.PushRequest{
 		Full:           false,
 		ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.Secret, Name: resourceName}),
-		Reason:         []model.TriggerReason{model.SecretTrigger},
+		// 证书轮转标记
+		Reason: []model.TriggerReason{model.SecretTrigger},
 	})
 }
 
@@ -80,10 +85,14 @@ func (s *Server) Stop() {
 	}
 }
 
+// 对xDS服务器进行初始化并绑定监听器，之后就可以接收SDS请求了
 func (s *Server) initWorkloadSdsService() {
+	// 创建gRPC协议处理服务器
 	s.grpcWorkloadServer = grpc.NewServer(s.grpcServerOptions()...)
+	// 将gRPC服务器与sdsServer绑定
 	s.workloadSds.register(s.grpcWorkloadServer)
 	var err error
+	// 创建/etc/istio/proxy/SDS UDS监听
 	s.grpcWorkloadListener, err = uds.NewListener(security.WorkloadIdentitySocketPath)
 	go func() {
 		sdsServiceLog.Info("Starting SDS grpc server")
@@ -102,6 +111,7 @@ func (s *Server) initWorkloadSdsService() {
 				}
 			}
 			if s.grpcWorkloadListener != nil {
+				// 运行sdsServer处理SDS请求
 				if err = s.grpcWorkloadServer.Serve(s.grpcWorkloadListener); err != nil {
 					sdsServiceLog.Errorf("SDS grpc server for workload proxies failed to start: %v", err)
 					serverOk = false
