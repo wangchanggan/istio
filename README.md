@@ -361,11 +361,11 @@ spec:
   - name: frontend
     #  开启LivenessProbe探测
     livenessProbe:
-	  # 设置探测方式
+      # 设置探测方式
       httpGet:
         path: /healthz
         port: 8080
-		......
+        ......
 ```
 
 上面的配置告知Kubelet定期向应用Pod发送HTTP探测请求，该请求在没有使用Istio网格的情况下将直接被应用容器接收，但在注入了istio-proxy容器后，处理路径发生了变化。可以通过kubectl get pod命令获取已经启动的Pod描述文件，发现LivenessProbe已经被修改为如下形式:
@@ -377,12 +377,12 @@ spec:
   #开启LivenessProbe探测
   livenessProbe:
     failureThreshold: 3
-	httpGet:
-	  # 探测目标被修改为新URL
-	  path: /app-health/frontend/livez
-	  # 探测目标端口为Pilot-agent监听端口
-	  port: 15020
-	  scheme: HTTP
+    httpGet:
+      # 探测目标被修改为新URL
+      path: /app-health/frontend/livez
+      # 探测目标端口为Pilot-agent监听端口
+      port: 15020
+      scheme: HTTP
 ```
 
 LivenessProbe的探测URL已经被修改为以/app-health开头、livez结尾的URL形式，中间为应用容器的名称。探测端口被修改为Pilot-agent监听端口15020。当Kubelet发送探测请求时，该HTTP请求将被直接发送到Pilot-agent进程。在Pilot-agent进程运行时启动statusServer，其线程任务管理器将安装/app-health处理器handleAppProbe
@@ -401,16 +401,16 @@ spec:
   - name: frontend
     # 开启ReadinessProbe探测
     readinessProbe:
-	  # 失败3次后重启
-	  failureThreshold: 3
-	  httpGet:
-	    # 探测URL地址
-		path: /app-health/frontend/readyz
-		port: 15020
-		scheme: HTTP
-	  periodSeconds: 10
-	  successThreshold: 1
-	  timeoutSeconds: 1
+      # 失败3次后重启
+      failureThreshold: 3
+      httpGet:
+        # 探测URL地址
+        path: /app-health/frontend/readyz
+        port: 15020
+        scheme: HTTP
+      periodSeconds: 10
+      successThreshold: 1
+      timeoutSeconds: 1
 ```
 
 与LivenessProbe不同的是ReadinessProbe的URL后缀变为readyz，这样就会在Pilot-agent进程对HTTP请求进行处理的handleAppProbeHTTPGet中匹配到不同的KubeAppProbers，并组成向应用容器发送的ReadinessProbe探测请求。
@@ -427,17 +427,17 @@ spec:
   - name: istio-proxy
     # 开启Envoy进程的ReadinessProbe探测
     readinessProbe:
-	  failureThreshold: 30
-	  httpGet:
-	    # 固定探测路径
-		path: /healthz/ready
-		# 固定探测端口指向Envoy进程
-		port: 15021
-		scheme: HTTP
-	  initialDelaySeconds: 1
-	  periodSeconds: 2
-	  successThreshold: 1
-	  timeoutSeconds: 3
+      failureThreshold: 30
+      httpGet:
+        # 固定探测路径
+        path: /healthz/ready
+        # 固定探测端口指向Envoy进程
+        port: 15021
+        scheme: HTTP
+      initialDelaySeconds: 1
+      periodSeconds: 2
+      successThreshold: 1
+      timeoutSeconds: 3
 ```
 
 使用kubelet命令向Envoy 15000的Admin端口发送/config_dump命令来得到监听器配置：
@@ -446,8 +446,8 @@ spec:
 "address": {
   "socket_address": {
     "address": "0.0.0.0",
-	# 匹配Envoy监听器
-	"port_value": 15021
+    # 匹配Envoy监听器
+    "port_value": 15021
   }
 }
 "filter_chains": [
@@ -455,22 +455,22 @@ spec:
   "filters": [
   {
     "name": "envoy.filters.network.http_connection_manager",
-	"typed_config": {
-	  "@type": "type.googleapis.com/envoy.extonsions.fllters.network.http_connection_manager.v3.HttpConnectionManager",
-	  "stat preflx": "agent",
-	  "route_config": {
-	    "virtual_hosts": [
-		......
-		  "routes": [
-		  {
-		    "match": {
-			  # 匹配URL
-			  "prefix": "/healthz/ready"
-		    },
-			"route": {
-			  # 路由到目标pilot-agent服务
-			  "cluster": "agent"
-			}
+    "typed_config": {
+      "@type": "type.googleapis.com/envoy.extonsions.fllters.network.http_connection_manager.v3.HttpConnectionManager",
+      "stat preflx": "agent",
+      "route_config": {
+        "virtual_hosts": [
+        ......
+          "routes": [
+          {
+            "match": {
+              # 匹配URL
+              "prefix": "/healthz/ready"
+            },
+            "route": {
+              # 路由到目标pilot-agent服务
+              "cluster": "agent"
+            }
 ```
 
 对15021端口的ReadinessProbe请求经过/healthz/ready的URL匹配后，路由到目标agent服务，其目标服务Cluster配置如下：
@@ -482,15 +482,15 @@ spec:
   "connect_timeout": "0.250s",
   "load_assignment": {
     "cluster_name": "agent",
-	"endpoints": [
-	{
-	  "lb_endpoints": [
-	  {
-	    "endpoint": {
-		  "address": {
-		    "socket_address": {
-			  "address": "127.0.0.1",
-			  "port_value": 15020
+    "endpoints": [
+    {
+      "lb_endpoints": [
+      {
+        "endpoint": {
+          "address": {
+            "socket_address": {
+              "address": "127.0.0.1",
+              "port_value": 15020
 ```
 
 agent最终连接到Pilot-agent进程的15020端口，其恰好是Pilot-agent进程的statusServer服务端口，并根据原始URL请求地址匹配handleReadyProbe方法。
@@ -511,14 +511,14 @@ pilot/cmd/pilot-agent/status/util/stats.go:71
 spec:
   selector:
     matchLabels:
-	  app: frontend
-	  ......
-	  annotations:
-	    proxy.istio.io/config: |
-		  readinessProbe:
-		    httpGet:
-			  path: /healthz
-			  port: 8080
+      app: frontend
+      ......
+      annotations:
+        proxy.istio.io/config: |
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
 ```
 
 pilot/cmd/pilot-agent/config/config.go:38
